@@ -128,7 +128,7 @@ def save_sorted_data(test_cases_weight, pathname):
 
 def get_weight(file_cov):
     """
-    The routine performs calculation of code coverage complexity using 
+    The routine performs calculation of code coverage complexity using
     Halstead B metric.
     @file_cov - path to coverage file
     @return - Halstead B complexity

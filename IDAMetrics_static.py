@@ -28,7 +28,6 @@ The views and conclusions contained in the software and documentation are those
 of the authors and should not be interpreted as representing official policies,
 either expressed or implied, of the FreeBSD Project.
 """
-
 """
 This IDA script collects static software complexity metrics for binary executable
 of x86 architecture.
@@ -73,12 +72,12 @@ import math
 import gc
 from time import strftime
 from collections import defaultdict
-from sets import Set
 from idaapi import *
 
-from Tkinter import *
-import tkMessageBox
-import Tkinter
+from PyQt5.QtWidgets import QWidget, QGroupBox, QDialog, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QPushButton
+from PyQt5.QtWidgets import QMainWindow, QFileDialog, QDialog, QLineEdit, QMessageBox,QAction, QMenu, QApplication, QLabel
+from PyQt5 import QtCore, QtGui, QtWidgets
+
 
 OTHER_INSTRUCTION = 0
 CALL_INSTRUCTION = 1
@@ -87,38 +86,46 @@ ASSIGNMENT_INSTRUCTION = 3
 COMPARE_INSTRUCTION = 4
 STACK_PUSH_INSTRUCTION = 5
 STACK_POP_INSTRUCTION = 6
-__EA64__ = idaapi.BADADDR == 0xFFFFFFFFFFFFFFFFL
+__EA64__ = idaapi.BADADDR == 0xFFFFFFFFFFFFFFFF
 
-FUNCATTR_END     =  4     # function end address
-ARGUMENT_SIZE    =  4
+FUNCATTR_END = 4  # function end address
+ARGUMENT_SIZE = 4
 if __EA64__:
-    FUNCATTR_END     = 8
+    FUNCATTR_END = 8
     ARGUMENT_SIZE = 8
 
-metrics_list = ["loc", "bbls", "calls", "condit", "assign", "cc", "cc_mod", "jilb", "abc", "pi", "h",
-                "harr", "bound", "span", "global", "oviedo", "chepin", "c&s", "h&c", "cocol"]
+metrics_list = [
+    "loc", "bbls", "calls", "condit", "assign", "cc", "cc_mod", "jilb", "abc",
+    "pi", "h", "harr", "bound", "span", "global", "oviedo", "chepin", "c&s",
+    "h&c", "cocol"
+]
 metrics_names = ["Lines of code", "Basic blocks count", "Routines calls count", "Conditions count",\
                  "Assignments count", "Cycl. complexity", "Cycl. complexity mod.", "Jilb", "ABC", \
                  "Pivovarsky", "Halstead", "Harrison", "Boundary values", "span metric", \
                  "Global vars access count", "Oviedo", "Chepin", "Card & Glass", "Henry & Cafura",\
                  "Cocol"]
 # group of assignment instructions ($5.1.1 vol.1 Intel x86 manual):
-assign_instructions_general = ["mov", "cmov", "xchg", "bswap", "xadd", "ad", "sub",
-                       "sbb", "imul", "mul", "idiv", "div", "inc", "dec", "neg",
-                       "da", "aa", "and", "or", "xor", "not", "sar", "shr", "sal",
-                       "shl", "shrd", "shld", "ror", "rol", "rcr", "rcl", "lod", "sto", "lea"]
-assign_instructions_fp = ["fld", "fst", "fild", "fisp", "fistp", "fbld", "fbstp", "fxch",
-                          "fcmove", "fadd", "fiadd", "fsub", "fisub", "fmul", "fimul", "fdiv",
-                          "fidiv", "fprem", "fabs", "fchs", "frndint", "fscale", "fsqrt", "fxtract",
-                          "fsin", "fcos", "fsincos", "fptan", "fpatan", "f2xm", "fyl2x", "fld",
-                          "fstcw", "fnstcw", "fldcw", "fstenv", "fnstenv", "fstsw", "fnstsw", "fxsave",
-                          "fxrstop"]
+assign_instructions_general = [
+    "mov", "cmov", "xchg", "bswap", "xadd", "ad", "sub", "sbb", "imul", "mul",
+    "idiv", "div", "inc", "dec", "neg", "da", "aa", "and", "or", "xor", "not",
+    "sar", "shr", "sal", "shl", "shrd", "shld", "ror", "rol", "rcr", "rcl",
+    "lod", "sto", "lea"
+]
+assign_instructions_fp = [
+    "fld", "fst", "fild", "fisp", "fistp", "fbld", "fbstp", "fxch", "fcmove",
+    "fadd", "fiadd", "fsub", "fisub", "fmul", "fimul", "fdiv", "fidiv",
+    "fprem", "fabs", "fchs", "frndint", "fscale", "fsqrt", "fxtract", "fsin",
+    "fcos", "fsincos", "fptan", "fpatan", "f2xm", "fyl2x", "fld", "fstcw",
+    "fnstcw", "fldcw", "fstenv", "fnstenv", "fstsw", "fnstsw", "fxsave",
+    "fxrstop"
+]
 compare_instructions = ["cmp", "test"]
 registers = ["eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp"]
 stack_push_instructions = ["push"]
 stack_pop_instructions = ["pop"]
 # i#1 add MMX/SSEx/AVX/64bit mode instructions.
 # i#2 add tests
+
 
 def GetInstructionType(instr_addr):
     instr_mnem = idc.GetMnem(instr_addr)
@@ -145,6 +152,7 @@ def GetInstructionType(instr_addr):
             return STACK_POP_INSTRUCTION
     return OTHER_INSTRUCTION
 
+
 class Halstead_metric:
     def __init__(self):
         self.n1 = 0
@@ -158,19 +166,25 @@ class Halstead_metric:
         self.B = 0
 
     def calculate(self):
-        n = self.n1+self.n2
-        N = self.N1+self.N2
+        n = self.n1 + self.n2
+        N = self.N1 + self.N2
         try:
-            self.Ni = self.n1 * math.log(self.n1, 2) + self.n2 * math.log(self.n2, 2)
+            self.Ni = self.n1 * math.log(self.n1, 2) + self.n2 * math.log(
+                self.n2, 2)
         except:
-            print "WARNING: Ni value for Halstead metric is too large to calculate"
+            print(
+                "WARNING: Ni value for Halstead metric is too large to calculate"
+            )
         self.V = N * math.log(n, 2)
         if self.n2 != 0:
-            self.D = (self.n1/2)*(self.N2/self.n2)
+            self.D = (self.n1 / 2) * (self.N2 / self.n2)
         else:
-            print "WARNING: n2 value for Halstead metric is 0. Skip evaluation for this routine"             
+            print(
+                "WARNING: n2 value for Halstead metric is 0. Skip evaluation for this routine"
+            )
         self.E = self.D * self.V
-        self.B = (self.E**(2.0/3.0))/3000
+        self.B = (self.E**(2.0 / 3.0)) / 3000
+
 
 class Metrics_function:
     def __init__(self, function_ea):
@@ -206,6 +220,7 @@ class Metrics_function:
         self.fan_out_s = 0
         self.HenrynCafura = 0
         self.Cocol = 0
+
 
 class Metrics:
     def __init__(self):
@@ -247,18 +262,20 @@ class Metrics:
         for seg_ea in idautils.Segments():
             # For each of the functions
             function_ea = seg_ea
-            while function_ea != 0xffffffffL:
+            while function_ea != 0xffffffff:
                 function_name = idc.GetFunctionName(function_ea)
                 # if already analyzed
                 if self.functions.get(function_name, None) != None:
                     function_ea = idc.NextFunction(function_ea)
                     continue
-                print "Analysing ", hex(function_ea)
+                print("Analysing ", hex(function_ea))
                 try:
-                    self.functions[function_name] = self.get_static_metrics(function_ea)
+                    self.functions[function_name] = self.get_static_metrics(
+                        function_ea)
                 except:
-                    print 'Can\'t collect metric for this function ', hex(function_ea)
-                    print 'Skip'
+                    print('Can\'t collect metric for this function ',
+                          hex(function_ea))
+                    print('Skip')
                     function_ea = idc.NextFunction(function_ea)
                     continue
                 self.collect_total_metrics(function_name)
@@ -276,27 +293,33 @@ class Metrics:
             self.global_vars_metric_total = self.add_global_vars_metric()
         if self.metrics_mask["cocol"] == 1:
             self.Cocol_total += self.Halstead_total.B + self.CC_total + self.total_loc_count
-            
+
     def collect_total_metrics(self, function_name):
         ''' The routine is used to add function measures to total metrics evaluation
         @function_name - name of function
-        '''        
+        '''
         self.total_loc_count += self.functions[function_name].loc_count
         self.total_bbl_count += self.functions[function_name].bbl_count
         self.total_func_count += 1
-        self.total_condition_count += self.functions[function_name].condition_count
+        self.total_condition_count += self.functions[
+            function_name].condition_count
         self.total_assign_count += self.functions[function_name].assign_count
         self.R_total += self.functions[function_name].R
 
         self.CC_modified_total += self.functions[function_name].CC_modified
         self.Pivovarsky_total += self.functions[function_name].Pivovarsky
         self.Harrison_total += self.functions[function_name].Harrison
-        self.boundary_values_total += self.functions[function_name].boundary_values
+        self.boundary_values_total += self.functions[
+            function_name].boundary_values
 
-        self.Halstead_total.n1 += self.functions[function_name].Halstead_basic.n1
-        self.Halstead_total.n2 += self.functions[function_name].Halstead_basic.n2
-        self.Halstead_total.N1 += self.functions[function_name].Halstead_basic.N1
-        self.Halstead_total.N2 += self.functions[function_name].Halstead_basic.N2
+        self.Halstead_total.n1 += self.functions[
+            function_name].Halstead_basic.n1
+        self.Halstead_total.n2 += self.functions[
+            function_name].Halstead_basic.n2
+        self.Halstead_total.N1 += self.functions[
+            function_name].Halstead_basic.N1
+        self.Halstead_total.N2 += self.functions[
+            function_name].Halstead_basic.N2
 
         self.CC_total += self.functions[function_name].CC
         self.CL_total += self.functions[function_name].CL
@@ -307,10 +330,12 @@ class Metrics:
         self.Chepin_total += self.functions[function_name].Chepin
         self.HenrynCafura_total += self.functions[function_name].HenrynCafura
         self.CardnGlass_total += self.functions[function_name].CardnGlass
-        
+
         if self.metrics_mask["cocol"] == 1:
-            self.functions[function_name].Cocol = self.functions[function_name].Halstead_basic.B + self.functions[function_name].CC + self.functions[function_name].loc_count
-            
+            self.functions[function_name].Cocol = self.functions[
+                function_name].Halstead_basic.B + self.functions[
+                    function_name].CC + self.functions[function_name].loc_count
+
     def add_global_vars_metric(self):
         '''
         The function calculates access count to global variables.
@@ -320,7 +345,9 @@ class Metrics:
         total_metric_count = 0
         for function in self.functions:
             if len(self.global_vars_dict) > 0:
-                self.functions[function].global_vars_metric = float(self.functions[function].global_vars_access)/len(self.global_vars_dict)
+                self.functions[function].global_vars_metric = float(
+                    self.functions[function].global_vars_access) / len(
+                        self.global_vars_dict)
             total_metric_count += self.functions[function].global_vars_metric
         return total_metric_count
 
@@ -340,7 +367,7 @@ class Metrics:
                     raise Exception("Can't identify bbl head")
                 continue
             else:
-                if prev_head == hex(0xffffffffL):
+                if prev_head == hex(0xffffffff):
                     return head
                 else:
                     return prev_head
@@ -355,12 +382,15 @@ class Metrics:
         # Enumerate all chunks in the function
         chunks = list()
         first_chunk = idc.FirstFuncFchunk(f_start)
-        chunks.append((first_chunk, idc.GetFchunkAttr(first_chunk, idc.FUNCATTR_END)))
+        chunks.append(
+            (first_chunk, idc.GetFchunkAttr(first_chunk, idc.FUNCATTR_END)))
         next_chunk = first_chunk
-        while next_chunk != 0xffffffffL:
+        while next_chunk != 0xffffffff:
             next_chunk = idc.NextFuncFchunk(f_start, next_chunk)
-            if next_chunk != 0xffffffffL:
-                chunks.append((next_chunk, idc.GetFchunkAttr(next_chunk, idc.FUNCATTR_END)))
+            if next_chunk != 0xffffffff:
+                chunks.append(
+                    (next_chunk, idc.GetFchunkAttr(next_chunk,
+                                                   idc.FUNCATTR_END)))
         return chunks
 
     def get_subgraph_nodes_count(self, node, node_graph, nodes_passed):
@@ -383,11 +413,12 @@ class Metrics:
             for child_node in child_nodes:
                 if child_node in nodes_passed:
                     continue
-                nodes_count += self.get_subgraph_nodes_count(child_node, node_graph, nodes_passed)
+                nodes_count += self.get_subgraph_nodes_count(
+                    child_node, node_graph, nodes_passed)
                 nodes_count += 1
         return nodes_count
 
-    def get_boundary_value_metric(self, node_graph, pivovarsky = False):
+    def get_boundary_value_metric(self, node_graph, pivovarsky=False):
         """
         Function returns absolute boundary value metric or Pi value for
         Pivovarsky metric.
@@ -403,14 +434,16 @@ class Metrics:
             out_edges_count = len(childs)
             if pivovarsky:
                 if out_edges_count == 2:
-                    boundary_value += self.get_subgraph_nodes_count(node, node_graph, list())
+                    boundary_value += self.get_subgraph_nodes_count(
+                        node, node_graph, list())
             else:
                 if out_edges_count >= 2:
-                    boundary_value += self.get_subgraph_nodes_count(node, node_graph, list())
+                    boundary_value += self.get_subgraph_nodes_count(
+                        node, node_graph, list())
                 else:
                     boundary_value += 1
         if not pivovarsky:
-            boundary_value -= 1 #exclude terminal node for boundary value metric
+            boundary_value -= 1  #exclude terminal node for boundary value metric
         return boundary_value
 
     def get_node_complexity(self, node, node_graph, bbls_dict, nodes_passed):
@@ -437,11 +470,13 @@ class Metrics:
                     continue
                 bbls_node = bbls_dict.get(child_node, None)
                 if bbls_node == None:
-                    print "WARNING: couldn't find bbl for child node: ", child_node
+                    print("WARNING: couldn't find bbl for child node: ",
+                          child_node)
                     loc_measure += 0
                 else:
                     loc_measure += len(bbls_node)
-                    loc_measure += self.get_node_complexity(child_node, node_graph, bbls_dict, nodes_passed)
+                    loc_measure += self.get_node_complexity(
+                        child_node, node_graph, bbls_dict, nodes_passed)
         return loc_measure
 
     def get_harrison_metric(self, node_graph, bbls):
@@ -462,12 +497,14 @@ class Metrics:
                 if loc_measure_node != None:
                     loc_measure += len(loc_measure_node)
                 else:
-                    print "WARNING: couldn't find bbl for node: ", node
+                    print("WARNING: couldn't find bbl for node: ", node)
             else:
-                loc_measure += self.get_node_complexity(node, node_graph, bbls_dict, list())
+                loc_measure += self.get_node_complexity(
+                    node, node_graph, bbls_dict, list())
                 bbls_predicate_node = bbls_dict.get(node, None)
                 if bbls_predicate_node == None:
-                    print "WARNING: couldn't find bbl for predicate node: ", node
+                    print("WARNING: couldn't find bbl for predicate node: ",
+                          node)
                 else:
                     loc_measure += len(bbls_predicate_node)
         return loc_measure
@@ -491,12 +528,12 @@ class Metrics:
         # additional functionality to make the graph correct for
         # functions with chunks and to add terminal nodes. (xref i#7)
 
-        for edge_from,edge_to in edges:
-            if edge_from == hex(0xffffffffL):
+        for edge_from, edge_to in edges:
+            if edge_from == hex(0xffffffff):
                 raise Exception("Invalid edge reference", edge_from)
             edges_dict.setdefault(edge_from, []).append(edge_to)
         for bbl in bbls:
-            bbls_dict[bbl[len(bbl)-1]] = [x for x in bbl]
+            bbls_dict[bbl[len(bbl) - 1]] = [x for x in bbl]
         boundaries_list = [hex(x) for x in boundaries]
 
         for edge_from in edges_dict:
@@ -507,16 +544,18 @@ class Metrics:
             if edge_from not in boundaries_list:
                 bbl_edge_from = bbls_dict.get(edge_from, None)
                 if bbl_edge_from == None:
-                    print "WARNING: Can't find bbl for ", edge_from
+                    print("WARNING: Can't find bbl for ", edge_from)
                 else:
                     node_graph[bbl_edge_from[0]] = node_edges_to
             else:
                 node_graph[edge_from] = node_edges_to
 
-        if len(node_graph) == 0 and len(edges_dict) == 0 and len(boundaries_list) == 1:
-            node_graph[boundaries_list[0]] = None #it means that graph has only single root node
-        elif len(node_graph) == 0 and len(edges_dict) !=0:
-            raise Exception ("Error when creating node graph")
+        if len(node_graph) == 0 and len(edges_dict) == 0 and len(
+                boundaries_list) == 1:
+            node_graph[boundaries_list[
+                0]] = None  #it means that graph has only single root node
+        elif len(node_graph) == 0 and len(edges_dict) != 0:
+            raise Exception("Error when creating node graph")
         #add terminal nodes (xref i#6)
         for bbl in bbls:
             check_bbl = node_graph.get(bbl[0], None)
@@ -577,15 +616,15 @@ class Metrics:
         @return - True if used
         '''
         for instr in bbl:
-            instr_type = GetInstructionType(int(instr,16))
+            instr_type = GetInstructionType(int(instr, 16))
             if instr_type == CALL_INSTRUCTION or\
                instr_type == BRANCH_INSTRUCTION:
                 instr_ops = self.get_instr_operands(int(instr, 16))
                 if op in instr_ops:
                     return True
                 #trying to replace ds: and check it again
-                op = op.replace("ds:","")
-                comment = idc.GetDisasm(int(instr,16))
+                op = op.replace("ds:", "")
+                comment = idc.GetDisasm(int(instr, 16))
                 if comment != None and op in comment:
                     return True
         return False
@@ -604,13 +643,13 @@ class Metrics:
         for local_var in local_vars:
             usage_list = local_vars.get(local_var, None)
             if usage_list == None:
-                print "WARNING: empty usage list for ", local_var
+                print("WARNING: empty usage list for ", local_var)
                 continue
             for head in usage_list:
                 ops = self.get_instr_operands(int(head, 16))
-                for idx, (op,type) in enumerate(ops):
+                for idx, (op, type) in enumerate(ops):
                     if op.count("+") == 1:
-                        value = idc.GetOperandValue(int (head, 16), idx)
+                        value = idc.GetOperandValue(int(head, 16), idx)
                         if value < (15 * ARGUMENT_SIZE) and "ebp" in op:
                             args_dict.setdefault(local_var, []).append(head)
                     elif op.count("+") == 2:
@@ -631,9 +670,9 @@ class Metrics:
         if "ret" in instr_mnem:
             ops = self.get_instr_operands(f_end)
             if len(ops) == 1:
-                for op,type in ops:
+                for op, type in ops:
                     op = op.replace("h", "")
-                    function_args_count = int(op,16)/ARGUMENT_SIZE
+                    function_args_count = int(op, 16) / ARGUMENT_SIZE
                     return function_args_count, args_dict
         #cdecl ?
         refs = idautils.CodeRefsTo(function_ea, 0)
@@ -644,10 +683,10 @@ class Metrics:
                 disasm = idc.GetDisasm(head)
                 if "add" in disasm and "esp," in disasm:
                     ops = self.get_instr_operands(head)
-                    op,type = ops[1]
+                    op, type = ops[1]
                     if op:
                         op = op.replace("h", "")
-                        function_args_count = int(op,16)/ARGUMENT_SIZE
+                        function_args_count = int(op, 16) / ARGUMENT_SIZE
                         return function_args_count, args_dict
         return function_args_count, args_dict
 
@@ -664,7 +703,7 @@ class Metrics:
                 instr_type = GetInstructionType(int(head, 16))
                 if instr_type == CALL_INSTRUCTION or instr_type == BRANCH_INSTRUCTION:
                     continue
-                for op,type in instr_op:
+                for op, type in instr_op:
                     if self.is_operand_called(op, bbl):
                         continue
                     if type >= idc.o_mem and type <= idc.o_displ:
@@ -717,7 +756,7 @@ class Metrics:
                 else:
                     operand = operand[operand.find("arg_"):operand.rfind("+")]
             else:
-                print "WARNING: unknown operand mask ", operand, hex(head)
+                print("WARNING: unknown operand mask ", operand, hex(head))
                 name = None
         else:
             name = None
@@ -735,7 +774,7 @@ class Metrics:
         for local_var in local_vars:
             usage_list = local_vars.get(local_var, None)
             if usage_list == None:
-                print "WARNING: empty usage list for ", local_var
+                print("WARNING: empty usage list for ", local_var)
                 continue
             for instr_addr in usage_list:
                 instr_mnem = idc.GetMnem(int(instr_addr, 16))
@@ -763,15 +802,17 @@ class Metrics:
         c = 0
         tmp_dict = dict()
         var_args_tmp = dict()
-        (p, var_args_tmp) = self.get_function_args_count(function_ea, local_vars)
+        (p,
+         var_args_tmp) = self.get_function_args_count(function_ea, local_vars)
         for local_var in local_vars:
             usage_list = local_vars.get(local_var, None)
             if usage_list == None:
-                print "WARNING: empty usage list for ", local_var
+                print("WARNING: empty usage list for ", local_var)
                 continue
             for instr_addr in usage_list:
                 instr_mnem = idc.GetMnem(int(instr_addr, 16))
-                if instr_mnem.startswith('cmp') or instr_mnem.startswith('test'):
+                if instr_mnem.startswith('cmp') or instr_mnem.startswith(
+                        'test'):
                     tmp_dict.setdefault(local_var, []).append(instr_addr)
 
         for var_arg in var_args_tmp:
@@ -783,7 +824,7 @@ class Metrics:
 
         c = len(tmp_dict)
         m = len(local_vars)
-        chepin = p + 2*m + 3*c
+        chepin = p + 2 * m + 3 * c
         return chepin
 
     def get_unique_vars_read_write_count(self, vars_dict):
@@ -798,23 +839,26 @@ class Metrics:
         for arg_var in vars_dict:
             usage_list = vars_dict.get(arg_var, None)
             if usage_list == None:
-                print "WARNING: empty usage list for ", arg_var
+                print("WARNING: empty usage list for ", arg_var)
                 continue
             for instr_addr in usage_list:
-                instr_type = GetInstructionType(int(instr_addr,16))
+                instr_type = GetInstructionType(int(instr_addr, 16))
                 if instr_type == ASSIGNMENT_INSTRUCTION:
                     #detect operand position
                     ops = self.get_instr_operands(int(instr_addr, 16))
                     for idx, (op, type) in enumerate(ops):
                         if arg_var in op and idx == 0:
-                            tmp_dict_write[arg_var] = tmp_dict_write.get(arg_var, 0) + 1
+                            tmp_dict_write[arg_var] = tmp_dict_write.get(
+                                arg_var, 0) + 1
                             break
                         else:
-                            tmp_dict_read[arg_var] = tmp_dict_read.get(arg_var, 0) + 1
+                            tmp_dict_read[arg_var] = tmp_dict_read.get(
+                                arg_var, 0) + 1
                 elif instr_type == COMPARE_INSTRUCTION:
                     tmp_dict_read[arg_var] = tmp_dict_read.get(arg_var, 0) + 1
                 elif instr_type == STACK_PUSH_INSTRUCTION:
-                    tmp_dict_write[arg_var] = tmp_dict_write.get(arg_var, 0) + 1
+                    tmp_dict_write[arg_var] = tmp_dict_write.get(arg_var,
+                                                                 0) + 1
                 else:
                     continue
         return len(tmp_dict_read), len(tmp_dict_write)
@@ -830,14 +874,17 @@ class Metrics:
         refs_to = idautils.CodeRefsTo(function_ea, 0)
         function_metrics.fan_in_s = sum(1 for y in refs_to)
 
-        (count, function_metrics.vars_args) = self.get_function_args_count(function_ea, function_metrics.vars_local)
+        (count, function_metrics.vars_args) = self.get_function_args_count(
+            function_ea, function_metrics.vars_local)
 
         # check input args
-        (read, write) = self.get_unique_vars_read_write_count(function_metrics.vars_args)
+        (read, write) = self.get_unique_vars_read_write_count(
+            function_metrics.vars_args)
         function_metrics.fan_in_i += read
         function_metrics.fan_out_i += write
         # check global variables list
-        (read, write) = self.get_unique_vars_read_write_count(function_metrics.global_vars_used)
+        (read, write) = self.get_unique_vars_read_write_count(
+            function_metrics.global_vars_used)
         function_metrics.fan_in_i += read
         function_metrics.fan_out_i += write
 
@@ -856,7 +903,7 @@ class Metrics:
         function_metrics = Metrics_function(function_ea)
 
         edges = set()
-        boundaries = Set((f_start,))
+        boundaries = Set((f_start, ))
         mnemonics = dict()
         operands = dict()
         node_graph = None
@@ -867,7 +914,7 @@ class Metrics:
         for chunk in chunks:
             for head in idautils.Heads(chunk[0], chunk[1]):
                 # If the element is an instruction
-                if head == hex(0xffffffffL):
+                if head == hex(0xffffffff):
                     raise Exception("Invalid head for parsing")
                 if isCode(idc.GetFlags(head)):
                     function_metrics.loc_count += 1
@@ -876,8 +923,8 @@ class Metrics:
                     refs = idautils.CodeRefsFrom(head, 0)
                     refs_filtered = set()
                     for ref in refs:
-                        if ref == hex(0xffffffffL):
-                            print "Invalid reference for head", head
+                        if ref == hex(0xffffffff):
+                            print("Invalid reference for head", head)
                             raise Exception("Invalid reference for head")
                         for chunk_filter in chunks:
                             if ref >= chunk_filter[0] and ref < chunk_filter[1]:
@@ -893,21 +940,26 @@ class Metrics:
                         # set dict of function calls
                         opnd = idc.GetOpnd(head, 0)
                         if opnd not in registers:
-                            opnd = opnd.replace("ds","")
-                            function_metrics.calls_dict[opnd] = function_metrics.calls_dict.get(opnd, 0) + 1
+                            opnd = opnd.replace("ds", "")
+                            function_metrics.calls_dict[
+                                opnd] = function_metrics.calls_dict.get(
+                                    opnd, 0) + 1
                         else:
                             opnd = idc.GetDisasm(head)
                             opnd = opnd[opnd.find(";") + 1:]
                             opnd = opnd.replace(" ", "")
                             if opnd != None:
-                                function_metrics.calls_dict[opnd] = function_metrics.calls_dict.get(opnd, 0) + 1
+                                function_metrics.calls_dict[
+                                    opnd] = function_metrics.calls_dict.get(
+                                        opnd, 0) + 1
                         # Thus, we skip dynamic function calls (e.g. call eax)
                     elif instruction_type == ASSIGNMENT_INSTRUCTION:
                         function_metrics.assign_count += 1
                     # Get the mnemonic and increment the mnemonic count
                     mnem = idc.GetMnem(head)
                     comment = idc.GetCommentEx(head, 0)
-                    if comment != None and comment.startswith('switch') and 'jump' not in comment:
+                    if comment != None and comment.startswith(
+                            'switch') and 'jump' not in comment:
                         case_count = comment[7:]
                         space_index = case_count.find(" ")
                         case_count = case_count[:space_index]
@@ -918,21 +970,27 @@ class Metrics:
 
                     if instruction_type != BRANCH_INSTRUCTION and instruction_type != CALL_INSTRUCTION:
                         ops = self.get_instr_operands(head)
-                        for idx, (op,type) in enumerate(ops):
+                        for idx, (op, type) in enumerate(ops):
                             operands[op] = operands.get(op, 0) + 1
                             if type == 2:
-                                if self.is_var_global(idc.GetOperandValue(head,idx), head) and "__" not in op:
-                                    self.global_vars_dict[op] = operands.get(op, 0) + 1
-                                    function_metrics.global_vars_used.setdefault(op, []).append(hex(head))
+                                if self.is_var_global(
+                                        idc.GetOperandValue(head, idx),
+                                        head) and "__" not in op:
+                                    self.global_vars_dict[op] = operands.get(
+                                        op, 0) + 1
+                                    function_metrics.global_vars_used.setdefault(
+                                        op, []).append(hex(head))
                                     function_metrics.global_vars_access += 1
                                 elif "__" not in op:
                                     # static variable
                                     name = op
-                                    function_metrics.vars_local.setdefault(name, []).append(hex(head))
+                                    function_metrics.vars_local.setdefault(
+                                        name, []).append(hex(head))
                             elif type == 3 or type == 4:
                                 name = self.get_local_var_name(op, head)
                                 if name:
-                                    function_metrics.vars_local.setdefault(name, []).append(hex(head))
+                                    function_metrics.vars_local.setdefault(
+                                        name, []).append(hex(head))
 
                     if refs:
                         # If the flow continues also to the next (address-wise)
@@ -941,8 +999,8 @@ class Metrics:
                         # if the condition is not met, so we save that
                         # reference as well.
                         next_head = idc.NextHead(head, chunk[1])
-                        if next_head == hex(0xffffffffL):
-                            print "Invalid next head after ", head
+                        if next_head == hex(0xffffffff):
+                            print("Invalid next head after ", head)
                             raise Exception("Invalid next head")
                         if isFlow(idc.GetFlags(next_head)):
                             refs.add(next_head)
@@ -957,7 +1015,7 @@ class Metrics:
                             # an edge is created.
                             if isFlow(idc.GetFlags(r)):
                                 prev_head = hex(idc.PrevHead(r, chunk[0]))
-                                if prev_head == hex(0xffffffffL):
+                                if prev_head == hex(0xffffffff):
                                     edges.add((hex(head), hex(r)))
                                     #raise Exception("invalid reference to previous instruction for", hex(r))
                                 else:
@@ -973,11 +1031,11 @@ class Metrics:
         for bbl in bbls:
             function_metrics.bbls_boundaries[bbl[0]] = [x for x in bbl]
         #Cyclomatic complexity CC = E - V + 2
-        if self.metrics_mask["cc"] == 1 or self.metrics_mask["cocol"] == 1:       
+        if self.metrics_mask["cc"] == 1 or self.metrics_mask["cocol"] == 1:
             function_metrics.CC = len(edges) - len(boundaries) + 2
 
         # R measure
-        function_metrics.R = len(edges)/len(boundaries)
+        function_metrics.R = len(edges) / len(boundaries)
         #Basic blocks count
         function_metrics.bbl_count = len(boundaries)
         #Jilb's metric: cl = CL/n
@@ -991,26 +1049,32 @@ class Metrics:
                                    pow(function_metrics.calls_count, 2)
             function_metrics.ABC = math.sqrt(function_metrics.ABC)
         # Create node graph
-        if self.metrics_mask["harr"] == 1 or self.metrics_mask["bound"] == 1 or self.metrics_mask["pi"] == 1:
+        if self.metrics_mask["harr"] == 1 or self.metrics_mask[
+                "bound"] == 1 or self.metrics_mask["pi"] == 1:
             node_graph = self.make_graph(edges, bbls, boundaries)
 
         #Harrison metric: f = sum(ci) i: 0...n
         if self.metrics_mask["harr"] == 1:
-            function_metrics.Harrison = self.get_harrison_metric(node_graph, bbls)
+            function_metrics.Harrison = self.get_harrison_metric(
+                node_graph, bbls)
 
         #boundary values metric: Sa = sum(nodes_complexity)
         if self.metrics_mask["bound"] == 1:
-            function_metrics.boundary_values = self.get_boundary_value_metric(node_graph)
+            function_metrics.boundary_values = self.get_boundary_value_metric(
+                node_graph)
 
         #CC_modified assumes switch (without default) as 1 edge and 1 node
         if self.metrics_mask["cc_mod"] == 1:
             if cases_in_switches:
-                function_metrics.CC_modified = (len(edges) - ((cases_in_switches - 1)*2)) - (len(boundaries) - (cases_in_switches - 1)) + 2
+                function_metrics.CC_modified = (len(edges) - (
+                    (cases_in_switches - 1) * 2)) - (
+                        len(boundaries) - (cases_in_switches - 1)) + 2
             else:
                 function_metrics.CC_modified = function_metrics.CC
         #Pivovarsky metric: N(G) = CC_modified + sum(pi) i: 0...n
         if self.metrics_mask["pi"] == 1:
-            function_metrics.Pivovarsky = function_metrics.CC_modified + self.get_boundary_value_metric(node_graph, True)
+            function_metrics.Pivovarsky = function_metrics.CC_modified + self.get_boundary_value_metric(
+                node_graph, True)
 
         #Halstead metric. see http://en.wikipedia.org/wiki/Halstead_complexity_measures
         if self.metrics_mask["h"] == 1 or self.metrics_mask["cocol"] == 1:
@@ -1018,24 +1082,29 @@ class Metrics:
             function_metrics.Halstead_basic.n1 = len(mnemonics)
             function_metrics.Halstead_basic.n2 = len(operands)
             if len(operands) != 0:
-                function_metrics.Halstead_basic.N2 = sum(v for v in operands.itervalues())
+                function_metrics.Halstead_basic.N2 = sum(
+                    v for v in operands.itervalues())
                 function_metrics.Halstead_basic.calculate()
 
         #Span metric
         if self.metrics_mask["span"] == 1:
-            function_metrics.span_metric = self.get_span_metric(function_metrics.bbls_boundaries)
+            function_metrics.span_metric = self.get_span_metric(
+                function_metrics.bbls_boundaries)
 
         # Oviedo metric C = aCF + bsum(DFi)
         if self.metrics_mask["oviedo"] == 1:
-            function_metrics.Oviedo = len(edges) + self.get_oviedo_df(function_metrics.vars_local)
+            function_metrics.Oviedo = len(edges) + self.get_oviedo_df(
+                function_metrics.vars_local)
 
         # Chepin metric Q= P+2M+3C
         if self.metrics_mask["chepin"] == 1:
-            function_metrics.Chepin = self.get_chepin(function_metrics.vars_local, function_ea, function_metrics)
+            function_metrics.Chepin = self.get_chepin(
+                function_metrics.vars_local, function_ea, function_metrics)
 
         # Henry and Cafura metric
         if self.metrics_mask["h&c"] == 1 or self.metrics_mask["c&s"] == 1:
-            function_metrics.HenrynCafura = self.get_henryncafura_metric(function_ea, function_metrics)
+            function_metrics.HenrynCafura = self.get_henryncafura_metric(
+                function_ea, function_metrics)
 
         # Card and Glass metric C = S + D
         if self.metrics_mask["c&s"] == 1:
@@ -1055,61 +1124,47 @@ class Metrics:
         gc.collect()
         return function_metrics
 
-def init_analysis (metrics_used):
+
+def init_analysis(metrics_used):
     metrics_total = Metrics()
     metrics_total.start_analysis(metrics_used)
-    
+
     current_time = strftime("%Y-%m-%d_%H-%M-%S")
     analyzed_file = idc.GetInputFile()
-    analyzed_file = analyzed_file.replace(".","_")
+    analyzed_file = analyzed_file.replace(".", "_")
     mask = analyzed_file + "_" + current_time + ".txt"
     name = AskFile(1, mask, "Where to save metrics ?")
-    
-    save_results(metrics_total, name)       
-    return 0
 
+    save_results(metrics_total, name)
+    return 0
 
 class UI:
     def __init__(self, callback):
-        self.mask = []
         self.metrics_used = dict()
-        self.top = Tkinter.Tk()
-        self.top.wm_title("Select metrics to calculate")        
-        for i in enumerate(metrics_list):
-            self.mask.append(IntVar())
-        frame = Frame(self.top)
-        frame.pack()
-        bottomframe4 = Frame(self.top)
-        bottomframe4.pack(side = BOTTOM)
-        bottomframe3 = Frame(self.top)
-        bottomframe3.pack(side = BOTTOM)
-        bottomframe2 = Frame(self.top)
-        bottomframe2.pack(side = BOTTOM)
-        bottomframe1 = Frame(self.top)
-        bottomframe1.pack(side = BOTTOM)
-        for iter,i in enumerate(self.mask):
-            if iter < 5:
-                frame_temp = frame
-            elif iter >= 5 and iter < 10:
-                frame_temp = bottomframe1
-            elif iter >= 10 and iter < 15:
-                frame_temp = bottomframe2
-            elif iter >=15:
-                frame_temp = bottomframe3
-            Checkbutton(frame_temp, text = metrics_names[iter], variable = i, \
-                        onvalue = 1, offvalue = 0).pack(side=LEFT)      
+        self.panel = QWidget()
+        self.panel.setWindowTitle("Select metrics to calculate")
+        self.panel.setLayout(QVBoxLayout())
+        self.mask = [0] * len(metrics_list)
+        groupbox = QGroupBox('metrics')
+        groupbox.setLayout(QHBoxLayout())
+        self.panel.layout().addWidget(groupbox)
+        for col in range(len(self.mask) // 5):
+            col_layout = QVBoxLayout()
+            for i in range(5):
+                # chk = QCheckBox(metrics_names[col * 5 + i])
+                # chk.setChecked(True)
+                col_layout.addWidget(QCheckBox(metrics_names[col * 5 + i]))
+            groupbox.layout().addLayout(col_layout)
+        button = QPushButton('Confirm')
+        button.clicked.connect(callback)
+        self.panel.layout().addWidget(button)
+        self.panel.show()
 
-        Button(bottomframe4, text = "Start", height=2, width = 10, \
-               command = lambda: self.GetUserChoice(callback)).pack(side=LEFT)
-        Button(bottomframe4, text = "Calculate all", height=2, width = 10, \
-               command =lambda: self.CalculateAll(callback)).pack(side=LEFT)
-        self.top.mainloop()
-        
     def CalculateAll(self, callback):
         ''' The routine sets all metrics as used and calls callback function
         @ callback - callback function
         '''
-        self.top.destroy()
+        self.panel.destroy()
         for i in metrics_list:
             self.metrics_used[i] = 1
         callback(self.metrics_used)
@@ -1119,103 +1174,146 @@ class UI:
         ''' The routine parses user choice and than calls callback function
         @ callback - callback function
         '''
-        self.top.destroy()
+        self.panel.destroy()
         #parse user choice
-        for iter,i in enumerate(metrics_list):
+        for iter, i in enumerate(metrics_list):
             self.metrics_used[i] = self.mask[iter].get()
         callback(self.metrics_used)
         return 0
 
+
 def save_results(metrics_total, name):
-    
-    print 'Average lines of code in a function:', metrics_total.average_loc_count
-    print 'Total number of functions:', metrics_total.total_func_count
-    print 'Total lines of code:', metrics_total.total_loc_count
-    print 'Total bbl count:', metrics_total.total_bbl_count
-    print 'Total assignments count:', metrics_total.total_assign_count
-    print 'Total R count:', metrics_total.R_total
-    print 'Total Cyclomatic complexity:', metrics_total.CC_total
-    print 'Total Jilb\'s metric:', metrics_total.CL_total
-    print 'Total ABC:', metrics_total.ABC_total
-    print 'Halstead:', metrics_total.Halstead_total.B
-    print 'Pivovarsky:', metrics_total.Pivovarsky_total
-    print 'Harrison:', metrics_total.Harrison_total
-    print 'Boundary value', metrics_total.boundary_values_total
-    print 'Span metric', metrics_total.span_metric_total
-    print 'Global var metric', metrics_total.global_vars_metric_total
-    print 'Oviedo metric', metrics_total.Oviedo_total
-    print 'Chepin metric', metrics_total.Chepin_total
-    print 'Henry&Cafura metric', metrics_total.HenrynCafura_total
-    print 'Cocol metric', metrics_total.Cocol_total
-    print 'Card&Glass metric', metrics_total.CardnGlass_total
+
+    print('Average lines of code in a function:',
+          metrics_total.average_loc_count)
+    print('Total number of functions:', metrics_total.total_func_count)
+    print('Total lines of code:', metrics_total.total_loc_count)
+    print('Total bbl count:', metrics_total.total_bbl_count)
+    print('Total assignments count:', metrics_total.total_assign_count)
+    print('Total R count:', metrics_total.R_total)
+    print('Total Cyclomatic complexity:', metrics_total.CC_total)
+    print('Total Jilb\'s metric:', metrics_total.CL_total)
+    print('Total ABC:', metrics_total.ABC_total)
+    print('Halstead:', metrics_total.Halstead_total.B)
+    print('Pivovarsky:', metrics_total.Pivovarsky_total)
+    print('Harrison:', metrics_total.Harrison_total)
+    print('Boundary value', metrics_total.boundary_values_total)
+    print('Span metric', metrics_total.span_metric_total)
+    print('Global var metric', metrics_total.global_vars_metric_total)
+    print('Oviedo metric', metrics_total.Oviedo_total)
+    print('Chepin metric', metrics_total.Chepin_total)
+    print('Henry&Cafura metric', metrics_total.HenrynCafura_total)
+    print('Cocol metric', metrics_total.Cocol_total)
+    print('Card&Glass metric', metrics_total.CardnGlass_total)
     #Save in log file
-    
+
     if name == None:
         return 0
     f = open(name, 'w')
-    f.write('Average lines of code in a function: ' + str(metrics_total.average_loc_count) + "\n")
-    f.write('Total number of functions: ' + str(metrics_total.total_func_count) + "\n")
-    f.write('Total lines of code: ' + str(metrics_total.total_loc_count) + "\n")
+    f.write('Average lines of code in a function: ' +
+            str(metrics_total.average_loc_count) + "\n")
+    f.write('Total number of functions: ' +
+            str(metrics_total.total_func_count) + "\n")
+    f.write('Total lines of code: ' + str(metrics_total.total_loc_count) +
+            "\n")
     f.write('Total bbl count: ' + str(metrics_total.total_bbl_count) + "\n")
-    f.write('Total assignments count: ' + str(metrics_total.total_assign_count) + "\n")
+    f.write('Total assignments count: ' +
+            str(metrics_total.total_assign_count) + "\n")
     f.write('Total R count: ' + str(metrics_total.R_total) + "\n")
-    f.write('Total Cyclomatic complexity: ' + str(metrics_total.CC_total) + "\n")
+    f.write('Total Cyclomatic complexity: ' + str(metrics_total.CC_total) +
+            "\n")
     f.write('Total Jilb\'s metric: ' + str(metrics_total.CL_total) + "\n")
     f.write('Total ABC: ' + str(metrics_total.ABC_total) + "\n")
     f.write('Total Halstead:' + str(metrics_total.Halstead_total.B) + "\n")
     f.write('Total Pivovarsky: ' + str(metrics_total.Pivovarsky_total) + "\n")
     f.write('Total Harrison: ' + str(metrics_total.Harrison_total) + "\n")
-    f.write('Total Boundary value: ' + str(metrics_total.boundary_values_total) + "\n")
-    f.write('Total Span metric: ' + str(metrics_total.span_metric_total) + "\n")
+    f.write('Total Boundary value: ' +
+            str(metrics_total.boundary_values_total) + "\n")
+    f.write('Total Span metric: ' + str(metrics_total.span_metric_total) +
+            "\n")
     f.write('Total Oviedo metric: ' + str(metrics_total.Oviedo_total) + "\n")
     f.write('Total Chepin metric: ' + str(metrics_total.Chepin_total) + "\n")
-    f.write('Henry&Cafura metric: ' + str(metrics_total.HenrynCafura_total) + "\n")
+    f.write('Henry&Cafura metric: ' + str(metrics_total.HenrynCafura_total) +
+            "\n")
     f.write('Cocol metric: ' + str(metrics_total.Cocol_total) + "\n")
     f.write('CardnGlass metric: ' + str(metrics_total.CardnGlass_total) + "\n")
     for function in metrics_total.functions:
         f.write(str(function) + "\n")
-        f.write('  Lines of code in the function: ' + str(metrics_total.functions[function].loc_count) + "\n")
-        f.write('  Bbls count: ' + str(metrics_total.functions[function].bbl_count) + "\n")
-        f.write('  Condition count: ' + str(metrics_total.functions[function].condition_count) + "\n")
-        f.write('  Calls count: ' + str(metrics_total.functions[function].calls_count) + "\n")
-        f.write('  Assignments count: ' + str(metrics_total.functions[function].assign_count) + "\n")
-        f.write('  Cyclomatic complexity: ' + str(metrics_total.functions[function].CC) + "\n")
-        f.write('  Cyclomatic complexity modified: ' + str(metrics_total.functions[function].CC_modified) + "\n")
-        f.write('  Jilb\'s metric: ' + str(metrics_total.functions[function].CL) + "\n")
+        f.write('  Lines of code in the function: ' +
+                str(metrics_total.functions[function].loc_count) + "\n")
+        f.write('  Bbls count: ' +
+                str(metrics_total.functions[function].bbl_count) + "\n")
+        f.write('  Condition count: ' +
+                str(metrics_total.functions[function].condition_count) + "\n")
+        f.write('  Calls count: ' +
+                str(metrics_total.functions[function].calls_count) + "\n")
+        f.write('  Assignments count: ' +
+                str(metrics_total.functions[function].assign_count) + "\n")
+        f.write('  Cyclomatic complexity: ' +
+                str(metrics_total.functions[function].CC) + "\n")
+        f.write('  Cyclomatic complexity modified: ' +
+                str(metrics_total.functions[function].CC_modified) + "\n")
+        f.write('  Jilb\'s metric: ' +
+                str(metrics_total.functions[function].CL) + "\n")
         f.write('  ABC: ' + str(metrics_total.functions[function].ABC) + "\n")
-        f.write('  R count: ' + str(metrics_total.functions[function].R) + "\n")
+        f.write('  R count: ' + str(metrics_total.functions[function].R) +
+                "\n")
 
-        f.write('    Halstead.B: ' + str(metrics_total.functions[function].Halstead_basic.B) + "\n")
-        f.write('    Halstead.E: ' + str(metrics_total.functions[function].Halstead_basic.E) + "\n")
-        f.write('    Halstead.D: ' + str(metrics_total.functions[function].Halstead_basic.D) + "\n")
-        f.write('    Halstead.N*: ' + str(metrics_total.functions[function].Halstead_basic.Ni) + "\n")
-        f.write('    Halstead.V: ' + str(metrics_total.functions[function].Halstead_basic.V) + "\n")
-        f.write('    Halstead.N1: ' + str(metrics_total.functions[function].Halstead_basic.N1) + "\n")
-        f.write('    Halstead.N2: ' + str(metrics_total.functions[function].Halstead_basic.N2) + "\n")
-        f.write('    Halstead.n1: ' + str(metrics_total.functions[function].Halstead_basic.n1) + "\n")
-        f.write('    Halstead.n2: ' + str(metrics_total.functions[function].Halstead_basic.n2) + "\n")
+        f.write('    Halstead.B: ' +
+                str(metrics_total.functions[function].Halstead_basic.B) + "\n")
+        f.write('    Halstead.E: ' +
+                str(metrics_total.functions[function].Halstead_basic.E) + "\n")
+        f.write('    Halstead.D: ' +
+                str(metrics_total.functions[function].Halstead_basic.D) + "\n")
+        f.write('    Halstead.N*: ' +
+                str(metrics_total.functions[function].Halstead_basic.Ni) +
+                "\n")
+        f.write('    Halstead.V: ' +
+                str(metrics_total.functions[function].Halstead_basic.V) + "\n")
+        f.write('    Halstead.N1: ' +
+                str(metrics_total.functions[function].Halstead_basic.N1) +
+                "\n")
+        f.write('    Halstead.N2: ' +
+                str(metrics_total.functions[function].Halstead_basic.N2) +
+                "\n")
+        f.write('    Halstead.n1: ' +
+                str(metrics_total.functions[function].Halstead_basic.n1) +
+                "\n")
+        f.write('    Halstead.n2: ' +
+                str(metrics_total.functions[function].Halstead_basic.n2) +
+                "\n")
 
-        f.write('  Pivovarsky: ' + str(metrics_total.functions[function].Pivovarsky) + "\n")
-        f.write('  Harrison: ' + str(metrics_total.functions[function].Harrison) + "\n")
-        f.write('  Cocol metric' + str(metrics_total.functions[function].Cocol) + "\n")
+        f.write('  Pivovarsky: ' +
+                str(metrics_total.functions[function].Pivovarsky) + "\n")
+        f.write('  Harrison: ' +
+                str(metrics_total.functions[function].Harrison) + "\n")
+        f.write('  Cocol metric' +
+                str(metrics_total.functions[function].Cocol) + "\n")
 
-        f.write('  Boundary value: ' + str(metrics_total.functions[function].boundary_values) + "\n")
-        f.write('  Span metric: ' + str(metrics_total.functions[function].span_metric) + "\n")
-        f.write('  Global vars metric:' + str(metrics_total.functions[function].global_vars_metric) + "\n")
-        f.write('  Oviedo metric: ' + str(metrics_total.functions[function].Oviedo) + "\n")
-        f.write('  Chepin metric: ' + str(metrics_total.functions[function].Chepin) + "\n")
-        f.write('  CardnGlass metric: ' + str(metrics_total.functions[function].CardnGlass) + "\n")
-        f.write('  Henry&Cafura metric: ' + str(metrics_total.functions[function].HenrynCafura) + "\n")
+        f.write('  Boundary value: ' +
+                str(metrics_total.functions[function].boundary_values) + "\n")
+        f.write('  Span metric: ' +
+                str(metrics_total.functions[function].span_metric) + "\n")
+        f.write('  Global vars metric:' +
+                str(metrics_total.functions[function].global_vars_metric) +
+                "\n")
+        f.write('  Oviedo metric: ' +
+                str(metrics_total.functions[function].Oviedo) + "\n")
+        f.write('  Chepin metric: ' +
+                str(metrics_total.functions[function].Chepin) + "\n")
+        f.write('  CardnGlass metric: ' +
+                str(metrics_total.functions[function].CardnGlass) + "\n")
+        f.write('  Henry&Cafura metric: ' +
+                str(metrics_total.functions[function].HenrynCafura) + "\n")
     f.close()
 
-def main():
-    print "Start metrics calculation" 
-    idc.Wait() #wait while ida finish analysis
+if __name__ == "__main__":
+    print("Start metrics calculation")
+    # ida_auto.auto_wait() #wait while ida finish analysis
     if os.getenv('IDAPYTHON') != 'auto':
         ui_setup = UI(init_analysis)
-        print "done"
-        return 0
-    else: #hidden mode
+        print("done")
+    else:  #hidden mode
         metrics_mask = dict()
         # calculate all metrics
         for i in metrics_list:
@@ -1225,13 +1323,10 @@ def main():
         metrics_total.start_analysis(metrics_mask)
         current_time = strftime("%Y-%m-%d_%H-%M-%S")
         analyzed_file = idc.GetInputFile()
-        analyzed_file = analyzed_file.replace(".","_")
+        analyzed_file = analyzed_file.replace(".", "_")
         name = os.getcwd()
         name = name + "/" + analyzed_file + "_" + current_time + ".txt"
         save_results(metrics_total, name)
-    
+
     if os.getenv('IDAPYTHON') == 'auto':
         Exit(0)
-    return 1
-if __name__ == "__main__":
-    main()
