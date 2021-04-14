@@ -128,7 +128,7 @@ stack_pop_instructions = ["pop"]
 
 
 def GetInstructionType(instr_addr):
-    instr_mnem = idc.GetMnem(instr_addr)
+    instr_mnem = idc.print_insn_mnem(instr_addr)
     if instr_mnem.startswith('call'):
         return CALL_INSTRUCTION
     elif instr_mnem.startswith('j'):
@@ -188,7 +188,7 @@ class Halstead_metric:
 
 class Metrics_function:
     def __init__(self, function_ea):
-        self.function_name = idc.GetFunctionName(function_ea)
+        self.function_name = idc.get_func_name(function_ea)
         self.loc_count = 0
         self.bbl_count = 0
         self.condition_count = 0
@@ -263,10 +263,10 @@ class Metrics:
             # For each of the functions
             function_ea = seg_ea
             while function_ea != 0xffffffff:
-                function_name = idc.GetFunctionName(function_ea)
+                function_name = idc.get_func_name(function_ea)
                 # if already analyzed
                 if self.functions.get(function_name, None) != None:
-                    function_ea = idc.NextFunction(function_ea)
+                    function_ea = idc.get_next_func(function_ea)
                     continue
                 print("Analysing ", hex(function_ea))
                 try:
@@ -276,10 +276,10 @@ class Metrics:
                     print('Can\'t collect metric for this function ',
                           hex(function_ea))
                     print('Skip')
-                    function_ea = idc.NextFunction(function_ea)
+                    function_ea = idc.get_next_func(function_ea)
                     continue
                 self.collect_total_metrics(function_name)
-                function_ea = idc.NextFunction(function_ea)
+                function_ea = idc.get_next_func(function_ea)
         self.collect_final_metrics()
 
     def collect_final_metrics(self):
@@ -360,8 +360,8 @@ class Metrics:
         """
 
         while 1:
-            prev_head = idc.PrevHead(head, 0)
-            if isFlow(idc.GetFlags(prev_head)):
+            prev_head = idc.prev_head(head, 0)
+            if isFlow(ida_bytes.get_full_flags(prev_head)):
                 head = prev_head
                 if prev_head >= SegEnd(head):
                     raise Exception("Can't identify bbl head")
@@ -381,15 +381,15 @@ class Metrics:
         """
         # Enumerate all chunks in the function
         chunks = list()
-        first_chunk = idc.FirstFuncFchunk(f_start)
+        first_chunk = idc.first_func_chunk(f_start)
         chunks.append(
-            (first_chunk, idc.GetFchunkAttr(first_chunk, idc.FUNCATTR_END)))
+            (first_chunk, idc.get_fchunk_attr(first_chunk, idc.FUNCATTR_END)))
         next_chunk = first_chunk
         while next_chunk != 0xffffffff:
-            next_chunk = idc.NextFuncFchunk(f_start, next_chunk)
+            next_chunk = idc.next_func_chunk(f_start, next_chunk)
             if next_chunk != 0xffffffff:
                 chunks.append(
-                    (next_chunk, idc.GetFchunkAttr(next_chunk,
+                    (next_chunk, idc.get_fchunk_attr(next_chunk,
                                                    idc.FUNCATTR_END)))
         return chunks
 
@@ -601,9 +601,9 @@ class Metrics:
         i = 0
         instr_op = list()
         while i < 4:
-            op = idc.GetOpnd(head, i)
+            op = idc.print_operand(head, i)
             if op != "":
-                instr_op.append((op, idc.GetOpType(head, i)))
+                instr_op.append((op, idc.get_operand_type(head, i)))
             i += 1
         return instr_op
 
@@ -649,7 +649,7 @@ class Metrics:
                 ops = self.get_instr_operands(int(head, 16))
                 for idx, (op, type) in enumerate(ops):
                     if op.count("+") == 1:
-                        value = idc.GetOperandValue(int(head, 16), idx)
+                        value = idc.get_operand_value(int(head, 16), idx)
                         if value < (15 * ARGUMENT_SIZE) and "ebp" in op:
                             args_dict.setdefault(local_var, []).append(head)
                     elif op.count("+") == 2:
@@ -663,9 +663,9 @@ class Metrics:
             return function_args_count, args_dict
 
         #TODO Check previous algorithm here
-        f_end = idc.FindFuncEnd(function_ea)
-        f_end = idc.PrevHead(f_end, 0)
-        instr_mnem = idc.GetMnem(f_end)
+        f_end = idc.find_func_end(function_ea)
+        f_end = idc.prev_head(f_end, 0)
+        instr_mnem = idc.print_insn_mnem(f_end)
         #stdcall ?
         if "ret" in instr_mnem:
             ops = self.get_instr_operands(f_end)
@@ -678,7 +678,7 @@ class Metrics:
         refs = idautils.CodeRefsTo(function_ea, 0)
         for ref in refs:
             #trying to find add esp,x signature after call
-            head = idc.NextHead(ref, 0xFFFFFFFF)
+            head = idc.next_head(ref, 0xFFFFFFFF)
             if head:
                 disasm = idc.GetDisasm(head)
                 if "add" in disasm and "esp," in disasm:
@@ -777,7 +777,7 @@ class Metrics:
                 print("WARNING: empty usage list for ", local_var)
                 continue
             for instr_addr in usage_list:
-                instr_mnem = idc.GetMnem(int(instr_addr, 16))
+                instr_mnem = idc.print_insn_mnem(int(instr_addr, 16))
                 if instr_mnem.startswith('mov'):
                     # get local var position
                     operands = self.get_instr_operands(int(instr_addr, 16))
@@ -810,7 +810,7 @@ class Metrics:
                 print("WARNING: empty usage list for ", local_var)
                 continue
             for instr_addr in usage_list:
-                instr_mnem = idc.GetMnem(int(instr_addr, 16))
+                instr_mnem = idc.print_insn_mnem(int(instr_addr, 16))
                 if instr_mnem.startswith('cmp') or instr_mnem.startswith(
                         'test'):
                     tmp_dict.setdefault(local_var, []).append(instr_addr)
@@ -899,7 +899,7 @@ class Metrics:
         @return - function metrics structure
         """
         f_start = function_ea
-        f_end = idc.FindFuncEnd(function_ea)
+        f_end = idc.find_func_end(function_ea)
         function_metrics = Metrics_function(function_ea)
 
         edges = set()
@@ -916,7 +916,7 @@ class Metrics:
                 # If the element is an instruction
                 if head == hex(0xffffffff):
                     raise Exception("Invalid head for parsing")
-                if isCode(idc.GetFlags(head)):
+                if isCode(ida_bytes.get_full_flags(head)):
                     function_metrics.loc_count += 1
                     # Get the references made from the current instruction
                     # and keep only the ones local to the function.
@@ -938,7 +938,7 @@ class Metrics:
                     elif instruction_type == CALL_INSTRUCTION:
                         function_metrics.calls_count += 1
                         # set dict of function calls
-                        opnd = idc.GetOpnd(head, 0)
+                        opnd = idc.print_operand(head, 0)
                         if opnd not in registers:
                             opnd = opnd.replace("ds", "")
                             function_metrics.calls_dict[
@@ -956,7 +956,7 @@ class Metrics:
                     elif instruction_type == ASSIGNMENT_INSTRUCTION:
                         function_metrics.assign_count += 1
                     # Get the mnemonic and increment the mnemonic count
-                    mnem = idc.GetMnem(head)
+                    mnem = idc.print_insn_mnem(head)
                     comment = idc.GetCommentEx(head, 0)
                     if comment != None and comment.startswith(
                             'switch') and 'jump' not in comment:
@@ -974,7 +974,7 @@ class Metrics:
                             operands[op] = operands.get(op, 0) + 1
                             if type == 2:
                                 if self.is_var_global(
-                                        idc.GetOperandValue(head, idx),
+                                        idc.get_operand_value(head, idx),
                                         head) and "__" not in op:
                                     self.global_vars_dict[op] = operands.get(
                                         op, 0) + 1
@@ -998,11 +998,11 @@ class Metrics:
                         # For instance, a conditional jump will not branch
                         # if the condition is not met, so we save that
                         # reference as well.
-                        next_head = idc.NextHead(head, chunk[1])
+                        next_head = idc.next_head(head, chunk[1])
                         if next_head == hex(0xffffffff):
                             print("Invalid next head after ", head)
                             raise Exception("Invalid next head")
-                        if isFlow(idc.GetFlags(next_head)):
+                        if isFlow(ida_bytes.get_full_flags(next_head)):
                             refs.add(next_head)
 
                         # Update the boundaries found so far.
@@ -1013,8 +1013,8 @@ class Metrics:
                             # If the flow could also come from the address
                             # previous to the destination of the branching
                             # an edge is created.
-                            if isFlow(idc.GetFlags(r)):
-                                prev_head = hex(idc.PrevHead(r, chunk[0]))
+                            if isFlow(ida_bytes.get_full_flags(r)):
+                                prev_head = hex(idc.prev_head(r, chunk[0]))
                                 if prev_head == hex(0xffffffff):
                                     edges.add((hex(head), hex(r)))
                                     #raise Exception("invalid reference to previous instruction for", hex(r))
@@ -1130,7 +1130,7 @@ def init_analysis(metrics_used):
     metrics_total.start_analysis(metrics_used)
 
     current_time = strftime("%Y-%m-%d_%H-%M-%S")
-    analyzed_file = idc.GetInputFile()
+    analyzed_file = ida_nalt.get_root_filename()
     analyzed_file = analyzed_file.replace(".", "_")
     mask = analyzed_file + "_" + current_time + ".txt"
     name = AskFile(1, mask, "Where to save metrics ?")
@@ -1144,19 +1144,21 @@ class UI:
         self.panel = QWidget()
         self.panel.setWindowTitle("Select metrics to calculate")
         self.panel.setLayout(QVBoxLayout())
-        self.mask = [0] * len(metrics_list)
+        self.chks = []
+        self.callback = callback
         groupbox = QGroupBox('metrics')
         groupbox.setLayout(QHBoxLayout())
         self.panel.layout().addWidget(groupbox)
-        for col in range(len(self.mask) // 5):
+        for col in range(len(metrics_list) // 5):
             col_layout = QVBoxLayout()
             for i in range(5):
-                # chk = QCheckBox(metrics_names[col * 5 + i])
-                # chk.setChecked(True)
-                col_layout.addWidget(QCheckBox(metrics_names[col * 5 + i]))
+                chk = QCheckBox(metrics_names[col * 5 + i])
+                self.chks.append(chk)
+                chk.setChecked(True)
+                col_layout.addWidget(chk)
             groupbox.layout().addLayout(col_layout)
         button = QPushButton('Confirm')
-        button.clicked.connect(callback)
+        button.clicked.connect(self.GetUserChoice)
         self.panel.layout().addWidget(button)
         self.panel.show()
 
@@ -1170,15 +1172,15 @@ class UI:
         callback(self.metrics_used)
         return 0
 
-    def GetUserChoice(self, callback):
+    def GetUserChoice(self):
         ''' The routine parses user choice and than calls callback function
         @ callback - callback function
         '''
-        self.panel.destroy()
         #parse user choice
+        print(self.chks)
         for iter, i in enumerate(metrics_list):
-            self.metrics_used[i] = self.mask[iter].get()
-        callback(self.metrics_used)
+            self.metrics_used[i] = (self.chks[iter].checkState() == QtCore.Qt.Checked)
+        self.callback(self.metrics_used)
         return 0
 
 
@@ -1322,7 +1324,7 @@ if __name__ == "__main__":
         metrics_total = Metrics()
         metrics_total.start_analysis(metrics_mask)
         current_time = strftime("%Y-%m-%d_%H-%M-%S")
-        analyzed_file = idc.GetInputFile()
+        analyzed_file = ida_nalt.get_root_filename()
         analyzed_file = analyzed_file.replace(".", "_")
         name = os.getcwd()
         name = name + "/" + analyzed_file + "_" + current_time + ".txt"
