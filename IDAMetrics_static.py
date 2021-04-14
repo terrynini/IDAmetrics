@@ -268,10 +268,15 @@ class Metrics:
                     function_ea = idc.get_next_func(function_ea)
                     continue
                 print(f"Analysing {function_name}@{hex(function_ea)}")
+                # self.functions[function_name] = self.get_static_metrics(
+                #         function_ea)
                 try:
-                    self.functions[function_name] = self.get_static_metrics(function_ea)
+                    self.functions[function_name] = self.get_static_metrics(
+                        function_ea)
                 except Exception as e:
-                    print(f"Can't collect metric for function {function_name}@{hex(function_ea)}")
+                    print(
+                        f"Can't collect metric for function {function_name}@{hex(function_ea)}"
+                    )
                     print(f"{e}")
                     print('Skip')
                     function_ea = idc.get_next_func(function_ea)
@@ -359,7 +364,7 @@ class Metrics:
 
         while 1:
             prev_head = idc.prev_head(head, 0)
-            if isFlow(ida_bytes.get_full_flags(prev_head)):
+            if is_flow(ida_bytes.get_full_flags(prev_head)):
                 head = prev_head
                 if prev_head >= SegEnd(head):
                     raise Exception("Can't identify bbl head")
@@ -1000,18 +1005,18 @@ class Metrics:
                         if next_head == hex(idaapi.BADADDR):
                             print("Invalid next head after ", head)
                             raise Exception("Invalid next head")
-                        if isFlow(ida_bytes.get_full_flags(next_head)):
+                        if is_flow(ida_bytes.get_full_flags(next_head)):
                             refs.add(next_head)
 
                         # Update the boundaries found so far.
-                        boundaries.union_update(refs)
+                        boundaries.update(refs)
                         # For each of the references found, and edge is
                         # created.
                         for r in refs:
                             # If the flow could also come from the address
                             # previous to the destination of the branching
                             # an edge is created.
-                            if isFlow(ida_bytes.get_full_flags(r)):
+                            if is_flow(ida_bytes.get_full_flags(r)):
                                 prev_head = hex(idc.prev_head(r, chunk[0]))
                                 if prev_head == hex(idaapi.BADADDR):
                                     edges.add((hex(head), hex(r)))
@@ -1038,7 +1043,10 @@ class Metrics:
         function_metrics.bbl_count = len(boundaries)
         #Jilb's metric: cl = CL/n
         if self.metrics_mask["jilb"] == 1:
-            function_metrics.CL = (float(function_metrics.condition_count) + \
+            if(function_metrics.loc_count == 0 ):
+                function_metrics.CL = 0
+            else:
+                function_metrics.CL = (float(function_metrics.condition_count) + \
                                    function_metrics.calls_count)/function_metrics.loc_count
         # ABC metric: ABC = sqrt(A*A + B*B + C*C)
         if self.metrics_mask["abc"] == 1:
@@ -1081,7 +1089,7 @@ class Metrics:
             function_metrics.Halstead_basic.n2 = len(operands)
             if len(operands) != 0:
                 function_metrics.Halstead_basic.N2 = sum(
-                    v for v in operands.itervalues())
+                    v for v in operands.values())
                 function_metrics.Halstead_basic.calculate()
 
         #Span metric
