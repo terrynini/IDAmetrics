@@ -75,9 +75,8 @@ from collections import defaultdict
 from idaapi import *
 
 from PyQt5.QtWidgets import QWidget, QGroupBox, QDialog, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QPushButton
-from PyQt5.QtWidgets import QMainWindow, QFileDialog, QDialog, QLineEdit, QMessageBox,QAction, QMenu, QApplication, QLabel
+from PyQt5.QtWidgets import QMainWindow, QFileDialog, QDialog, QLineEdit, QMessageBox, QAction, QMenu, QApplication, QLabel
 from PyQt5 import QtCore, QtGui, QtWidgets
-
 
 OTHER_INSTRUCTION = 0
 CALL_INSTRUCTION = 1
@@ -262,19 +261,18 @@ class Metrics:
         for seg_ea in idautils.Segments():
             # For each of the functions
             function_ea = seg_ea
-            while function_ea != 0xffffffff:
+            while function_ea != idaapi.BADADDR:
                 function_name = idc.get_func_name(function_ea)
                 # if already analyzed
                 if self.functions.get(function_name, None) != None:
                     function_ea = idc.get_next_func(function_ea)
                     continue
-                print("Analysing ", hex(function_ea))
+                print(f"Analysing {function_name}@{hex(function_ea)}")
                 try:
-                    self.functions[function_name] = self.get_static_metrics(
-                        function_ea)
-                except:
-                    print('Can\'t collect metric for this function ',
-                          hex(function_ea))
+                    self.functions[function_name] = self.get_static_metrics(function_ea)
+                except Exception as e:
+                    print(f"Can't collect metric for function {function_name}@{hex(function_ea)}")
+                    print(f"{e}")
                     print('Skip')
                     function_ea = idc.get_next_func(function_ea)
                     continue
@@ -367,7 +365,7 @@ class Metrics:
                     raise Exception("Can't identify bbl head")
                 continue
             else:
-                if prev_head == hex(0xffffffff):
+                if prev_head == hex(idaapi.BADADDR):
                     return head
                 else:
                     return prev_head
@@ -385,11 +383,11 @@ class Metrics:
         chunks.append(
             (first_chunk, idc.get_fchunk_attr(first_chunk, idc.FUNCATTR_END)))
         next_chunk = first_chunk
-        while next_chunk != 0xffffffff:
+        while next_chunk != idaapi.BADADDR:
             next_chunk = idc.next_func_chunk(f_start, next_chunk)
-            if next_chunk != 0xffffffff:
-                chunks.append(
-                    (next_chunk, idc.get_fchunk_attr(next_chunk,
+            if next_chunk != idaapi.BADADDR:
+                chunks.append((next_chunk,
+                               idc.get_fchunk_attr(next_chunk,
                                                    idc.FUNCATTR_END)))
         return chunks
 
@@ -529,7 +527,7 @@ class Metrics:
         # functions with chunks and to add terminal nodes. (xref i#7)
 
         for edge_from, edge_to in edges:
-            if edge_from == hex(0xffffffff):
+            if edge_from == hex(idaapi.BADADDR):
                 raise Exception("Invalid edge reference", edge_from)
             edges_dict.setdefault(edge_from, []).append(edge_to)
         for bbl in bbls:
@@ -678,7 +676,7 @@ class Metrics:
         refs = idautils.CodeRefsTo(function_ea, 0)
         for ref in refs:
             #trying to find add esp,x signature after call
-            head = idc.next_head(ref, 0xFFFFFFFF)
+            head = idc.next_head(ref, idaapi.BADADDR)
             if head:
                 disasm = idc.GetDisasm(head)
                 if "add" in disasm and "esp," in disasm:
@@ -903,7 +901,7 @@ class Metrics:
         function_metrics = Metrics_function(function_ea)
 
         edges = set()
-        boundaries = Set((f_start, ))
+        boundaries = set((f_start, ))
         mnemonics = dict()
         operands = dict()
         node_graph = None
@@ -914,16 +912,16 @@ class Metrics:
         for chunk in chunks:
             for head in idautils.Heads(chunk[0], chunk[1]):
                 # If the element is an instruction
-                if head == hex(0xffffffff):
+                if head == hex(idaapi.BADADDR):
                     raise Exception("Invalid head for parsing")
-                if isCode(ida_bytes.get_full_flags(head)):
+                if is_code(ida_bytes.get_full_flags(head)):
                     function_metrics.loc_count += 1
                     # Get the references made from the current instruction
                     # and keep only the ones local to the function.
                     refs = idautils.CodeRefsFrom(head, 0)
                     refs_filtered = set()
                     for ref in refs:
-                        if ref == hex(0xffffffff):
+                        if ref == hex(idaapi.BADADDR):
                             print("Invalid reference for head", head)
                             raise Exception("Invalid reference for head")
                         for chunk_filter in chunks:
@@ -999,7 +997,7 @@ class Metrics:
                         # if the condition is not met, so we save that
                         # reference as well.
                         next_head = idc.next_head(head, chunk[1])
-                        if next_head == hex(0xffffffff):
+                        if next_head == hex(idaapi.BADADDR):
                             print("Invalid next head after ", head)
                             raise Exception("Invalid next head")
                         if isFlow(ida_bytes.get_full_flags(next_head)):
@@ -1015,7 +1013,7 @@ class Metrics:
                             # an edge is created.
                             if isFlow(ida_bytes.get_full_flags(r)):
                                 prev_head = hex(idc.prev_head(r, chunk[0]))
-                                if prev_head == hex(0xffffffff):
+                                if prev_head == hex(idaapi.BADADDR):
                                     edges.add((hex(head), hex(r)))
                                     #raise Exception("invalid reference to previous instruction for", hex(r))
                                 else:
@@ -1127,16 +1125,16 @@ class Metrics:
 
 def init_analysis(metrics_used):
     metrics_total = Metrics()
-    metrics_total.start_analysis(metrics_used)
-
+    metrics_total.start_analysis(metrics_used)  # 64bits IDA will stuck here
     current_time = strftime("%Y-%m-%d_%H-%M-%S")
     analyzed_file = ida_nalt.get_root_filename()
     analyzed_file = analyzed_file.replace(".", "_")
     mask = analyzed_file + "_" + current_time + ".txt"
-    name = AskFile(1, mask, "Where to save metrics ?")
+    name = ida_kernwin.ask_file(1, mask, "Where to save metrics ?")
 
     save_results(metrics_total, name)
     return 0
+
 
 class UI:
     def __init__(self, callback):
@@ -1162,24 +1160,14 @@ class UI:
         self.panel.layout().addWidget(button)
         self.panel.show()
 
-    def CalculateAll(self, callback):
-        ''' The routine sets all metrics as used and calls callback function
-        @ callback - callback function
-        '''
-        self.panel.destroy()
-        for i in metrics_list:
-            self.metrics_used[i] = 1
-        callback(self.metrics_used)
-        return 0
-
     def GetUserChoice(self):
         ''' The routine parses user choice and than calls callback function
         @ callback - callback function
         '''
         #parse user choice
-        print(self.chks)
         for iter, i in enumerate(metrics_list):
-            self.metrics_used[i] = (self.chks[iter].checkState() == QtCore.Qt.Checked)
+            self.metrics_used[i] = (
+                self.chks[iter].checkState() == QtCore.Qt.Checked)
         self.callback(self.metrics_used)
         return 0
 
@@ -1309,12 +1297,11 @@ def save_results(metrics_total, name):
                 str(metrics_total.functions[function].HenrynCafura) + "\n")
     f.close()
 
+
 if __name__ == "__main__":
-    print("Start metrics calculation")
-    # ida_auto.auto_wait() #wait while ida finish analysis
+    ida_auto.auto_wait()  #wait while ida finish analysis
     if os.getenv('IDAPYTHON') != 'auto':
-        ui_setup = UI(init_analysis)
-        print("done")
+        ui = UI(init_analysis)
     else:  #hidden mode
         metrics_mask = dict()
         # calculate all metrics
