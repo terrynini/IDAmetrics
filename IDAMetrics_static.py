@@ -324,9 +324,8 @@ class Metrics:
         total_metric_count = 0
         for function in self.functions:
             if len(self.global_vars_dict) > 0:
-                self.functions[function].global_vars_metric = float(
-                    self.functions[function].global_vars_access) / len(
-                        self.global_vars_dict)
+                self.functions[function].global_vars_metric = self.functions[
+                    function].global_vars_access / len(self.global_vars_dict)
             total_metric_count += self.functions[function].global_vars_metric
         return total_metric_count
 
@@ -338,19 +337,18 @@ class Metrics:
         @return - head address of the basic block.
         """
 
-        while 1:
+        while True:
             prev_head = idc.prev_head(head, 0)
-            if is_flow(ida_bytes.get_full_flags(prev_head)):
-                head = prev_head
-                if prev_head >= SegEnd(head):
-                    raise Exception("Can't identify bbl head")
-                continue
-            else:
-                if prev_head == hex(idaapi.BADADDR):
-                    return head
-                else:
-                    return prev_head
+            if not is_flow(ida_bytes.get_full_flags(prev_head)):
                 break
+            head = prev_head
+            if prev_head >= SegEnd(head):
+                raise Exception("Can't identify bbl head")
+
+        if prev_head == idaapi.BADADDR:
+            return head
+        else:
+            return prev_head
 
     def enumerate_function_chunks(self, f_start):
         """
@@ -889,7 +887,7 @@ class Metrics:
         for chunk in chunks:
             for head in idautils.Heads(chunk[0], chunk[1]):
                 # If the element is an instruction
-                if head == hex(idaapi.BADADDR):
+                if head == idaapi.BADADDR:
                     raise Exception("Invalid head for parsing")
                 if is_code(ida_bytes.get_full_flags(head)):
                     function_metrics.loc_count += 1
@@ -898,7 +896,7 @@ class Metrics:
                     refs = idautils.CodeRefsFrom(head, 0)
                     refs_filtered = set()
                     for ref in refs:
-                        if ref == hex(idaapi.BADADDR):
+                        if ref == idaapi.BADADDR:
                             print("Invalid reference for head", head)
                             raise Exception("Invalid reference for head")
                         for chunk_filter in chunks:
@@ -975,7 +973,7 @@ class Metrics:
                         # if the condition is not met, so we save that
                         # reference as well.
                         next_head = idc.next_head(head, chunk[1])
-                        if next_head == hex(idaapi.BADADDR):
+                        if next_head == idaapi.BADADDR:
                             print("Invalid next head after ", head)
                             raise Exception("Invalid next head")
                         if is_flow(ida_bytes.get_full_flags(next_head)):
@@ -990,12 +988,12 @@ class Metrics:
                             # previous to the destination of the branching
                             # an edge is created.
                             if is_flow(ida_bytes.get_full_flags(r)):
-                                prev_head = hex(idc.prev_head(r, chunk[0]))
-                                if prev_head == hex(idaapi.BADADDR):
+                                prev_head = idc.prev_head(r, chunk[0])
+                                if prev_head == idaapi.BADADDR:
                                     edges.add((hex(head), hex(r)))
                                     #raise Exception("invalid reference to previous instruction for", hex(r))
                                 else:
-                                    edges.add((prev_head, hex(r)))
+                                    edges.add((hex(prev_head), hex(r)))
                             edges.add((hex(head), hex(r)))
         # i#7: New algorithm of edges and boundaries constructing is required..
         # Now boundaries and edges are making by using internal IDA functionality
