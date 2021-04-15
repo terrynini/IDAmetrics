@@ -80,19 +80,16 @@ from PyQt5.QtWidgets import QWidget, QGroupBox, QDialog, QVBoxLayout, QHBoxLayou
 from PyQt5.QtWidgets import QMainWindow, QFileDialog, QDialog, QLineEdit, QMessageBox, QAction, QMenu, QApplication, QLabel
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-
 class inType(Enum):
     OTHER_INSTRUCTION = 0
     CALL_INSTRUCTION = 1
     BRANCH_INSTRUCTION = 2
     ASSIGNMENT_INSTRUCTION = 3
     COMPARE_INSTRUCTION = 4
-
+    STACK_PUSH_INSTRUCTION = 5
+    STACK_POP_INSTRUCTION = 6
 
 __EA64__ = idaapi.BADADDR == 0xFFFFFFFFFFFFFFFF
-
-CF_CHG = ida_idp.CF_CHG1 | ida_idp.CF_CHG2 | ida_idp.CF_CHG3 | ida_idp.CF_CHG4 | ida_idp.CF_CHG5 | ida_idp.CF_CHG6  # | ida_idp.CF_CHG7 | ida_idp.CF_CHG8
-CF_USE = ida_idp.CF_USE1 | ida_idp.CF_USE2 | ida_idp.CF_USE3 | ida_idp.CF_USE4 | ida_idp.CF_USE5 | ida_idp.CF_USE6  # | ida_idp.CF_USE7 | ida_idp.CF_USE8
 
 FUNCATTR_END = 4  # function end address
 ARGUMENT_SIZE = 4
@@ -111,20 +108,51 @@ metrics_names = ["Lines of code", "Basic blocks count", "Routines calls count", 
                  "Global vars access count", "Oviedo", "Chepin", "Card & Glass", "Henry & Cafura",\
                  "Cocol"]
 
+# group of assignment instructions ($5.1.1 vol.1 Intel x86 manual):
+assign_instructions_general = [
+    "mov", "cmov", "xchg", "bswap", "xadd", "ad", "sub", "sbb", "imul", "mul",
+    "idiv", "div", "inc", "dec", "neg", "da", "aa", "and", "or", "xor", "not",
+    "sar", "shr", "sal", "shl", "shrd", "shld", "ror", "rol", "rcr", "rcl",
+    "lod", "sto", "lea"
+]
+assign_instructions_fp = [
+    "fld", "fst", "fild", "fisp", "fistp", "fbld", "fbstp", "fxch", "fcmove",
+    "fadd", "fiadd", "fsub", "fisub", "fmul", "fimul", "fdiv", "fidiv",
+    "fprem", "fabs", "fchs", "frndint", "fscale", "fsqrt", "fxtract", "fsin",
+    "fcos", "fsincos", "fptan", "fpatan", "f2xm", "fyl2x", "fld", "fstcw",
+    "fnstcw", "fldcw", "fstenv", "fnstenv", "fstsw", "fnstsw", "fxsave",
+    "fxrstop"
+]
+compare_instructions = ["cmp", "test"]
+stack_push_instructions = ["push"]
+stack_pop_instructions = ["pop"]
+# i#1 add MMX/SSEx/AVX/64bit mode instructions.
+# i#2 add tests
+
 
 def GetInstructionType(instr_addr):
-    insn = ida_ua.insn_t()
-    inslen = ida_ua.decode_insn(insn, instr_addr)
-    if ida_idp.is_call_insn(insn):
-        return inType.CALL_INSTRUCTION
-    # TODO: jump should be implemented by the is_flow API, but need function bound
     instr_mnem = idc.print_insn_mnem(instr_addr)
-    if instr_mnem.startswith('j'):
+    if instr_mnem.startswith('call'):
+        return inType.CALL_INSTRUCTION
+    elif instr_mnem.startswith('j'):
+        # It seems that there is no other type of instructions
+        # starting with j in x86/x86_64
         return inType.BRANCH_INSTRUCTION
-    if ida_idp.has_insn_feature(insn.itype, CF_CHG):
-        return inType.ASSIGNMENT_INSTRUCTION
-    if ida_idp.has_insn_feature(insn.itype, CF_USE):
-        return inType.COMPARE_INSTRUCTION
+    for assign_instr_mnem in assign_instructions_general:
+        if instr_mnem.startswith(assign_instr_mnem):
+            return inType.ASSIGNMENT_INSTRUCTION
+    for assign_instr_mnem in assign_instructions_fp:
+        if instr_mnem.startswith(assign_instr_mnem):
+            return inType.ASSIGNMENT_INSTRUCTION
+    for compare_instruction in compare_instructions:
+        if instr_mnem.startswith(compare_instruction):
+            return inType.COMPARE_INSTRUCTION
+    for stack_push_instruction in stack_push_instructions:
+        if instr_mnem.startswith(stack_push_instruction):
+            return inType.STACK_PUSH_INSTRUCTION
+    for stack_pop_instruction in stack_pop_instructions:
+        if instr_mnem.startswith(stack_pop_instruction):
+            return inType.STACK_POP_INSTRUCTION
     return inType.OTHER_INSTRUCTION
 
 
@@ -554,7 +582,7 @@ class Metrics:
         bbl = []
         # NOTE: We can handle if jump xrefs to chunk address space.
         for chunk in chunks:
-            for head in idautils.Heads(*chunk):
+            for head in idautils.Heads(chunk[0], chunk[1]):
                 if head in boundaries or head in edges:
                     if len(bbl) > 0:
                         bbls.append(bbl)
@@ -596,7 +624,8 @@ class Metrics:
         '''
         for instr in bbl:
             instr_type = GetInstructionType(int(instr, 16))
-            if instr_type == inType.CALL_INSTRUCTION or instr_type == inType.BRANCH_INSTRUCTION:
+            if instr_type == inType.CALL_INSTRUCTION or\
+               instr_type == inType.BRANCH_INSTRUCTION:
                 instr_ops = self.get_instr_operands(int(instr, 16))
                 if op in instr_ops:
                     return True
@@ -834,6 +863,9 @@ class Metrics:
                                 arg_var, 0) + 1
                 elif instr_type == inType.COMPARE_INSTRUCTION:
                     tmp_dict_read[arg_var] = tmp_dict_read.get(arg_var, 0) + 1
+                elif instr_type == inType.STACK_PUSH_INSTRUCTION:
+                    tmp_dict_write[arg_var] = tmp_dict_write.get(arg_var,
+                                                                 0) + 1
                 else:
                     continue
         return len(tmp_dict_read), len(tmp_dict_write)
@@ -914,7 +946,7 @@ class Metrics:
                         function_metrics.calls_count += 1
                         # set dict of function calls
                         opnd = idc.print_operand(head, 0)
-                        opnd_type = idc.get_operand_type(head, 0)
+                        opnd_type = idc.get_operand_type(head,0)
                         if opnd_type != idc.o_reg:
                             opnd = opnd.replace("ds", "")
                             function_metrics.calls_dict[
@@ -1016,7 +1048,7 @@ class Metrics:
         function_metrics.bbl_count = len(boundaries)
         #Jilb's metric: cl = CL/n
         if self.metrics_mask["jilb"] == 1:
-            if (function_metrics.loc_count == 0):
+            if(function_metrics.loc_count == 0 ):
                 function_metrics.CL = 0
             else:
                 function_metrics.CL = (float(function_metrics.condition_count) + \
@@ -1065,7 +1097,7 @@ class Metrics:
                     v for v in operands.values())
                 function_metrics.Halstead_basic.calculate()
 
-        # Span metric
+        #Span metric
         if self.metrics_mask["span"] == 1:
             function_metrics.span_metric = self.get_span_metric(
                 function_metrics.bbls_boundaries)
@@ -1277,22 +1309,6 @@ def save_results(metrics_total, name):
         f.write('  Henry&Cafura metric: ' +
                 str(metrics_total.functions[function].HenrynCafura) + "\n")
     f.close()
-
-
-class debug:
-    def list_type(ea):
-        """
-        return the list of type of instructions in a function for debugging
-        example usage:
-        it_list = list_type(0x187A0)
-        """
-        f = ida_funcs.get_func(ea)
-        adr = f.start_ea
-        ins = []
-        while adr < f.end_ea:
-            ins.append((GetInstructionType(adr), adr))
-            adr = idc.next_head(adr)
-        return ins
 
 
 if __name__ == "__main__":
