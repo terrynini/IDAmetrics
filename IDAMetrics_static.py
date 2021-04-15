@@ -358,16 +358,12 @@ class Metrics:
         """
         # Enumerate all chunks in the function
         chunks = list()
-        first_chunk = idc.first_func_chunk(f_start)
-        chunks.append(
-            (first_chunk, idc.get_fchunk_attr(first_chunk, idc.FUNCATTR_END)))
-        next_chunk = first_chunk
+        next_chunk = idc.first_func_chunk(f_start)
         while next_chunk != idaapi.BADADDR:
+            chunks.append(
+                (next_chunk, idc.get_fchunk_attr(next_chunk,
+                                                 idc.FUNCATTR_END)))
             next_chunk = idc.next_func_chunk(f_start, next_chunk)
-            if next_chunk != idaapi.BADADDR:
-                chunks.append((next_chunk,
-                               idc.get_fchunk_attr(next_chunk,
-                                                   idc.FUNCATTR_END)))
         return chunks
 
     def get_subgraph_nodes_count(self, node, node_graph, nodes_passed):
