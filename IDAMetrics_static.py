@@ -162,8 +162,10 @@ class Halstead_metric:
 
 
 class Metrics_function:
-    def __init__(self, function_ea):
+    def __init__(self, function_ea, metrics_mask):
         self.function_name = idc.get_func_name(function_ea)
+        self.function_ea = function_ea
+        self.metrics_mask = metrics_mask
         self.loc_count = 0
         self.bbl_count = 0
         self.condition_count = 0
@@ -196,138 +198,317 @@ class Metrics_function:
         self.HenrynCafura = 0
         self.Cocol = 0
 
-
-class Metrics:
-    def __init__(self):
-        self.metrics_mask = dict()
-        self.total_loc_count = 0
-        self.average_loc_count = 0.0
-        self.total_bbl_count = 0
-        self.total_func_count = 0
-        self.total_condition_count = 0
-        self.total_assign_count = 0
-        self.R_total = 0.0
-        self.CC_total = 0
-        self.CL_total = 0
-        self.ABC_total = 0
-        self.Halstead_total = Halstead_metric()
-        self.CC_modified_total = 0
-        self.Pivovarsky_total = 0
-        self.Harrison_total = 0.0
-        self.boundary_values_total = 0.0
-        self.span_metric_total = 0
-        self.Oviedo_total = 0
-        self.Chepin_total = 0
-        self.global_vars_dict = dict()
-        self.global_vars_metric_total = 0.0
-        self.Cocol_total = 0
-        self.HenrynCafura_total = 0.0
-        self.CardnGlass_total = 0.0
-        self.functions = dict()
-
-    def start_analysis(self, metrics_used):
+    def start_analysis(self):
         """
-        The function starts static metrics analysis.
-        @metrics_used - a dictionary of metrics used in the following format {metrics_list element:1 or 0}
-        PTAL metrics_list global list and args_parser routine
-        @return - None
+        The function calculates all supported metrics.
+        @function_ea - function address
+        @return - function metrics structure
         """
-        self.metrics_mask = metrics_used
-        # For each of the segments
-        for seg_ea in idautils.Segments():
-            # For each of the functions
-            function_ea = seg_ea
-            while function_ea != idaapi.BADADDR:
-                function_name = idc.get_func_name(function_ea)
-                # if already analyzed
-                if self.functions.get(function_name, None) != None:
-                    function_ea = idc.get_next_func(function_ea)
-                    continue
-                print(f"Analysing {function_name}@{hex(function_ea)}")
-                # self.functions[function_name] = self.get_static_metrics(
-                #         function_ea)
-                try:
-                    self.functions[function_name] = self.get_static_metrics(
-                        function_ea)
-                except Exception as e:
-                    print(
-                        f"Can't collect metric for function {function_name}@{hex(function_ea)}"
-                    )
-                    print(f"{e}")
-                    print('Skip')
-                    function_ea = idc.get_next_func(function_ea)
-                    continue
-                self.collect_total_metrics(function_name)
-                function_ea = idc.get_next_func(function_ea)
-        self.collect_final_metrics()
+        function_ea = self.function_ea
+        f_start = function_ea
+        f_end = idc.find_func_end(function_ea)
 
-    def collect_final_metrics(self):
-        ''' The routine collect some metrics that should be calculated after analysis
-        '''
-        if self.total_func_count > 0:
-            self.average_loc_count = self.total_loc_count / self.total_func_count
+        edges = set()
+        boundaries = set((f_start, ))
+        mnemonics = dict()
+        operands = dict()
+        node_graph = None
+        cases_in_switches = 0
+
+        chunks = self.enumerate_function_chunks()
+        # For each defined chunk in the function.
+        for chunk in chunks:
+            for head in idautils.Heads(*chunk):
+                # If the element is an instruction
+                if head == idaapi.BADADDR:
+                    raise Exception("Invalid head for parsing")
+                if is_code(ida_bytes.get_full_flags(head)):
+                    self.loc_count += 1
+                    # Get the references made from the current instruction
+                    # and keep only the ones local to the function.
+                    refs = idautils.CodeRefsFrom(head, 0)
+                    refs_filtered = set()
+                    for ref in refs:
+                        if ref == idaapi.BADADDR:
+                            print("Invalid reference for head", head)
+                            raise Exception("Invalid reference for head")
+                        for chunk_filter in chunks:
+                            if ref >= chunk_filter[0] and ref < chunk_filter[1]:
+                                refs_filtered.add(ref)
+                                break  # break ?
+                    refs = refs_filtered
+                    # Get instruction type and increase metrics
+                    instruction_type = GetInstructionType(head)
+                    if instruction_type == inType.BRANCH_INSTRUCTION:
+                        self.condition_count += 1
+                    elif instruction_type == inType.CALL_INSTRUCTION:
+                        self.calls_count += 1
+                        # set dict of function calls
+                        opnd = idc.print_operand(head, 0)
+                        opnd_type = idc.get_operand_type(head, 0)
+                        if opnd_type != idc.o_reg:
+                            opnd = opnd.replace("ds", "")
+                            self.calls_dict[opnd] = self.calls_dict.get(
+                                opnd, 0) + 1
+                        else:
+                            opnd = idc.GetDisasm(head)
+                            opnd = opnd[opnd.find(";") + 1:]
+                            opnd = opnd.replace(" ", "")
+                            if opnd != None:
+                                self.calls_dict[opnd] = self.calls_dict.get(
+                                    opnd, 0) + 1
+                        # Thus, we skip dynamic function calls (e.g. call eax)
+                    elif instruction_type == inType.ASSIGNMENT_INSTRUCTION:
+                        self.assign_count += 1
+                    # Get the mnemonic and increment the mnemonic count
+                    mnem = idc.print_insn_mnem(head)
+                    comment = idc.GetCommentEx(head, 0)
+                    if comment != None and comment.startswith(
+                            'switch') and 'jump' not in comment:
+                        case_count = comment[7:]
+                        space_index = case_count.find(" ")
+                        case_count = case_count[:space_index]
+                        case_count = int(case_count)
+                        # there is calc_switch_cases idaapi function
+                        cases_in_switches += case_count
+                    mnemonics[mnem] = mnemonics.get(mnem, 0) + 1
+
+                    if instruction_type != inType.BRANCH_INSTRUCTION and instruction_type != inType.CALL_INSTRUCTION:
+                        ops = self.get_instr_operands(head)
+                        for idx, (op, type) in enumerate(ops):
+                            operands[op] = operands.get(op, 0) + 1
+                            if type == 2:
+                                if self.is_var_global(
+                                        idc.get_operand_value(head, idx),
+                                        head) and "__" not in op:
+                                    self.global_vars_dict[op] = operands.get(
+                                        op, 0) + 1
+                                    self.global_vars_used.setdefault(
+                                        op, []).append(hex(head))
+                                    self.global_vars_access += 1
+                                elif "__" not in op:
+                                    # static variable
+                                    name = op
+                                    self.vars_local.setdefault(name,
+                                                               []).append(
+                                                                   hex(head))
+                            elif type == 3 or type == 4:
+                                name = self.get_local_var_name(op, head)
+                                if name:
+                                    self.vars_local.setdefault(name,
+                                                               []).append(
+                                                                   hex(head))
+
+                    if refs:
+                        # If the flow continues also to the next (address-wise)
+                        # instruction, we add a reference to it.
+                        # For instance, a conditional jump will not branch
+                        # if the condition is not met, so we save that
+                        # reference as well.
+                        next_head = idc.next_head(head, chunk[1])
+                        if next_head == idaapi.BADADDR:
+                            print("Invalid next head after ", head)
+                            raise Exception("Invalid next head")
+                        if is_flow(ida_bytes.get_full_flags(next_head)):
+                            refs.add(next_head)
+
+                        # Update the boundaries found so far.
+                        boundaries.update(refs)
+                        # For each of the references found, and edge is
+                        # created.
+                        for r in refs:
+                            # If the flow could also come from the address
+                            # previous to the destination of the branching
+                            # an edge is created.
+                            if is_flow(ida_bytes.get_full_flags(r)):
+                                prev_head = idc.prev_head(r, chunk[0])
+                                if prev_head == idaapi.BADADDR:
+                                    edges.add((hex(head), hex(r)))
+                                    #raise Exception("invalid reference to previous instruction for", hex(r))
+                                else:
+                                    edges.add((hex(prev_head), hex(r)))
+                            edges.add((hex(head), hex(r)))
+        # i#7: New algorithm of edges and boundaries constructing is required..
+        # Now boundaries and edges are making by using internal IDA functionality
+        # but it doesn't work for functions which have jumps beyond function boundaries
+        # (or jumps to "red" areas of code). Now we're generating warning in such
+        # situations but we need to manually parse all instructions.
+        bbls = self.get_bbls(chunks, boundaries, edges)
+        # save bbls boundaries in dict
+        for bbl in bbls:
+            self.bbls_boundaries[bbl[0]] = [x for x in bbl]
+        #Cyclomatic complexity CC = E - V + 2
+        if self.metrics_mask["cc"] == 1 or self.metrics_mask["cocol"] == 1:
+            self.CC = len(edges) - len(boundaries) + 2
+
+        # R measure
+        self.R = len(edges) / len(boundaries)
+        #Basic blocks count
+        self.bbl_count = len(boundaries)
+        #Jilb's metric: cl = CL/n
+        if self.metrics_mask["jilb"] == 1:
+            if (self.loc_count == 0):
+                self.CL = 0
+            else:
+                self.CL = (float(self.condition_count) + \
+                                   self.calls_count)/self.loc_count
+        # ABC metric: ABC = sqrt(A*A + B*B + C*C)
+        if self.metrics_mask["abc"] == 1:
+            self.ABC = pow(self.assign_count, 2) +\
+                                   pow(self.condition_count, 2) +\
+                                   pow(self.calls_count, 2)
+            self.ABC = math.sqrt(self.ABC)
+        # Create node graph
+        if self.metrics_mask["harr"] == 1 or self.metrics_mask[
+                "bound"] == 1 or self.metrics_mask["pi"] == 1:
+            node_graph = self.make_graph(edges, bbls, boundaries)
+
+        #Harrison metric: f = sum(ci) i: 0...n
+        if self.metrics_mask["harr"] == 1:
+            self.Harrison = self.get_harrison_metric(node_graph, bbls)
+
+        #boundary values metric: Sa = sum(nodes_complexity)
+        if self.metrics_mask["bound"] == 1:
+            self.boundary_values = self.get_boundary_value_metric(node_graph)
+
+        #CC_modified assumes switch (without default) as 1 edge and 1 node
+        if self.metrics_mask["cc_mod"] == 1:
+            if cases_in_switches:
+                self.CC_modified = (len(edges) -
+                                    ((cases_in_switches - 1) * 2)) - (
+                                        len(boundaries) -
+                                        (cases_in_switches - 1)) + 2
+            else:
+                self.CC_modified = self.CC
+        #Pivovarsky metric: N(G) = CC_modified + sum(pi) i: 0...n
+        if self.metrics_mask["pi"] == 1:
+            self.Pivovarsky = self.CC_modified + self.get_boundary_value_metric(
+                node_graph, True)
+
+        #Halstead metric. see http://en.wikipedia.org/wiki/Halstead_complexity_measures
         if self.metrics_mask["h"] == 1 or self.metrics_mask["cocol"] == 1:
-            self.Halstead_total.calculate()
-        if self.metrics_mask["global"] == 1:
-            self.global_vars_metric_total = self.add_global_vars_metric()
-        if self.metrics_mask["cocol"] == 1:
-            self.Cocol_total += self.Halstead_total.B + self.CC_total + self.total_loc_count
+            self.Halstead_basic.N1 = self.loc_count
+            self.Halstead_basic.n1 = len(mnemonics)
+            self.Halstead_basic.n2 = len(operands)
+            if len(operands) != 0:
+                self.Halstead_basic.N2 = sum(v for v in operands.values())
+                self.Halstead_basic.calculate()
 
-    def collect_total_metrics(self, function_name):
-        ''' The routine is used to add function measures to total metrics evaluation
-        @function_name - name of function
+        # Span metric
+        if self.metrics_mask["span"] == 1:
+            self.span_metric = self.get_span_metric(self.bbls_boundaries)
+
+        # Oviedo metric C = aCF + bsum(DFi)
+        if self.metrics_mask["oviedo"] == 1:
+            self.Oviedo = len(edges) + self.get_oviedo_df(self.vars_local)
+
+        # Chepin metric Q= P+2M+3C
+        if self.metrics_mask["chepin"] == 1:
+            self.Chepin = self.get_chepin(self.vars_local, function_ea)
+
+        # Henry and Cafura metric
+        if self.metrics_mask["h&c"] == 1 or self.metrics_mask["c&s"] == 1:
+            self.HenrynCafura = self.get_henryncafura_metric(function_ea)
+
+        # Card and Glass metric C = S + D
+        if self.metrics_mask["c&s"] == 1:
+            self.CardnGlass = pow((self.fan_out_i + self.fan_out_s), 2) +\
+                                  (len(self.vars_args))/(self.fan_out_i + self.fan_out_s + 1)
+        #free memory
+        if node_graph:
+            node_graph.clear()
+        self.vars_local.clear()
+        self.vars_args.clear()
+        self.global_vars_used.clear()
+        self.calls_dict.clear()
+        mnemonics.clear()
+        operands.clear()
+        edges.clear()
+        boundaries.clear()
+        gc.collect()
+
+    def enumerate_function_chunks(self):
+        """
+        The function gets a list of chunks for the function.
+        @f_start - first address of the function
+        @return - list of chunks
+        """
+        # Enumerate all chunks in the function
+        chunks = list()
+        next_chunk = idc.first_func_chunk(self.function_ea)
+        while next_chunk != idaapi.BADADDR:
+            chunks.append(
+                (next_chunk, idc.get_fchunk_attr(next_chunk,
+                                                 idc.FUNCATTR_END)))
+            next_chunk = idc.next_func_chunk(self.function_ea, next_chunk)
+        return chunks
+
+    def get_chepin(self, local_vars, function_ea):
         '''
-        self.total_loc_count += self.functions[function_name].loc_count
-        self.total_bbl_count += self.functions[function_name].bbl_count
-        self.total_func_count += 1
-        self.total_condition_count += self.functions[
-            function_name].condition_count
-        self.total_assign_count += self.functions[function_name].assign_count
-        self.R_total += self.functions[function_name].R
-
-        self.CC_modified_total += self.functions[function_name].CC_modified
-        self.Pivovarsky_total += self.functions[function_name].Pivovarsky
-        self.Harrison_total += self.functions[function_name].Harrison
-        self.boundary_values_total += self.functions[
-            function_name].boundary_values
-
-        self.Halstead_total.n1 += self.functions[
-            function_name].Halstead_basic.n1
-        self.Halstead_total.n2 += self.functions[
-            function_name].Halstead_basic.n2
-        self.Halstead_total.N1 += self.functions[
-            function_name].Halstead_basic.N1
-        self.Halstead_total.N2 += self.functions[
-            function_name].Halstead_basic.N2
-
-        self.CC_total += self.functions[function_name].CC
-        self.CL_total += self.functions[function_name].CL
-        self.ABC_total += self.functions[function_name].ABC
-
-        self.span_metric_total += self.functions[function_name].span_metric
-        self.Oviedo_total += self.functions[function_name].Oviedo
-        self.Chepin_total += self.functions[function_name].Chepin
-        self.HenrynCafura_total += self.functions[function_name].HenrynCafura
-        self.CardnGlass_total += self.functions[function_name].CardnGlass
-
-        if self.metrics_mask["cocol"] == 1:
-            self.functions[function_name].Cocol = self.functions[
-                function_name].Halstead_basic.B + self.functions[
-                    function_name].CC + self.functions[function_name].loc_count
-
-    def add_global_vars_metric(self):
+        The function calculates Chepin metric
+        @local_vars - a dictionary of local variables
+        @function_ea - function entry address
+        @function_metrics - function metrics structure
+        @return - Chepin value
         '''
-        The function calculates access count to global variables.
-        @return - total access count
-        '''
+        chepin = 0
+        p = 0
+        m = 0
+        c = 0
+        tmp_dict = dict()
+        var_args_tmp = dict()
+        (p,
+         var_args_tmp) = self.get_function_args_count(function_ea, local_vars)
+        for local_var in local_vars:
+            usage_list = local_vars.get(local_var, None)
+            if usage_list == None:
+                print("WARNING: empty usage list for ", local_var)
+                continue
+            for instr_addr in usage_list:
+                instr_mnem = idc.print_insn_mnem(int(instr_addr, 16))
+                if instr_mnem.startswith('cmp') or instr_mnem.startswith(
+                        'test'):
+                    tmp_dict.setdefault(local_var, []).append(instr_addr)
 
-        total_metric_count = 0
-        for function in self.functions:
-            if len(self.global_vars_dict) > 0:
-                self.functions[function].global_vars_metric = self.functions[
-                    function].global_vars_access / len(self.global_vars_dict)
-            total_metric_count += self.functions[function].global_vars_metric
-        return total_metric_count
+        for var_arg in var_args_tmp:
+            if var_arg in local_vars:
+                del local_vars[var_arg]
+        for cmp_var in tmp_dict:
+            if cmp_var in local_vars:
+                del local_vars[cmp_var]
+
+        c = len(tmp_dict)
+        m = len(local_vars)
+        chepin = p + 2 * m + 3 * c
+        return chepin
+
+    def get_henryncafura_metric(self, function_ea):
+        '''
+        The function performs evaluation of Henry&Cafura metric
+        @function_ea - function entry address
+        @function_metrics - function_metrics structure
+        @return - Henry&Cafura metric
+        '''
+        self.fan_out_s = len(self.calls_dict)
+        refs_to = idautils.CodeRefsTo(function_ea, 0)
+        self.fan_in_s = sum(1 for y in refs_to)
+
+        (count, self.vars_args) = self.get_function_args_count(
+            function_ea, self.vars_local)
+
+        # check input args
+        (read, write) = self.get_unique_vars_read_write_count(self.vars_args)
+        self.fan_in_i += read
+        self.fan_out_i += write
+        # check global variables list
+        (read,
+         write) = self.get_unique_vars_read_write_count(self.global_vars_used)
+        self.fan_in_i += read
+        self.fan_out_i += write
+
+        fan_in = self.fan_in_s + self.fan_in_i
+        fan_out = self.fan_out_s + self.fan_out_i
+        return self.CC + pow((fan_in + fan_out), 2)
 
     def get_bbl_head(self, head):
         """
@@ -349,22 +530,6 @@ class Metrics:
             return head
         else:
             return prev_head
-
-    def enumerate_function_chunks(self, f_start):
-        """
-        The function gets a list of chunks for the function.
-        @f_start - first address of the function
-        @return - list of chunks
-        """
-        # Enumerate all chunks in the function
-        chunks = list()
-        next_chunk = idc.first_func_chunk(f_start)
-        while next_chunk != idaapi.BADADDR:
-            chunks.append(
-                (next_chunk, idc.get_fchunk_attr(next_chunk,
-                                                 idc.FUNCATTR_END)))
-            next_chunk = idc.next_func_chunk(f_start, next_chunk)
-        return chunks
 
     def get_subgraph_nodes_count(self, node, node_graph, nodes_passed):
         """
@@ -760,45 +925,6 @@ class Metrics:
             oviedo_df += len(usage_list)
         return oviedo_df
 
-    def get_chepin(self, local_vars, function_ea, function_metrics):
-        '''
-        The function calculates Chepin metric
-        @local_vars - a dictionary of local variables
-        @function_ea - function entry address
-        @function_metrics - function metrics structure
-        @return - Chepin value
-        '''
-        chepin = 0
-        p = 0
-        m = 0
-        c = 0
-        tmp_dict = dict()
-        var_args_tmp = dict()
-        (p,
-         var_args_tmp) = self.get_function_args_count(function_ea, local_vars)
-        for local_var in local_vars:
-            usage_list = local_vars.get(local_var, None)
-            if usage_list == None:
-                print("WARNING: empty usage list for ", local_var)
-                continue
-            for instr_addr in usage_list:
-                instr_mnem = idc.print_insn_mnem(int(instr_addr, 16))
-                if instr_mnem.startswith('cmp') or instr_mnem.startswith(
-                        'test'):
-                    tmp_dict.setdefault(local_var, []).append(instr_addr)
-
-        for var_arg in var_args_tmp:
-            if var_arg in local_vars:
-                del local_vars[var_arg]
-        for cmp_var in tmp_dict:
-            if cmp_var in local_vars:
-                del local_vars[cmp_var]
-
-        c = len(tmp_dict)
-        m = len(local_vars)
-        chepin = p + 2 * m + 3 * c
-        return chepin
-
     def get_unique_vars_read_write_count(self, vars_dict):
         '''
         The function performs evaluation of read/write count for each
@@ -832,270 +958,138 @@ class Metrics:
                     continue
         return len(tmp_dict_read), len(tmp_dict_write)
 
-    def get_henryncafura_metric(self, function_ea, function_metrics):
-        '''
-        The function performs evaluation of Henry&Cafura metric
-        @function_ea - function entry address
-        @function_metrics - function_metrics structure
-        @return - Henry&Cafura metric
-        '''
-        function_metrics.fan_out_s = len(function_metrics.calls_dict)
-        refs_to = idautils.CodeRefsTo(function_ea, 0)
-        function_metrics.fan_in_s = sum(1 for y in refs_to)
 
-        (count, function_metrics.vars_args) = self.get_function_args_count(
-            function_ea, function_metrics.vars_local)
+class Metrics:
+    def __init__(self):
+        self.metrics_mask = dict()
+        self.total_loc_count = 0
+        self.average_loc_count = 0.0
+        self.total_bbl_count = 0
+        self.total_func_count = 0
+        self.total_condition_count = 0
+        self.total_assign_count = 0
+        self.R_total = 0.0
+        self.CC_total = 0
+        self.CL_total = 0
+        self.ABC_total = 0
+        self.Halstead_total = Halstead_metric()
+        self.CC_modified_total = 0
+        self.Pivovarsky_total = 0
+        self.Harrison_total = 0.0
+        self.boundary_values_total = 0.0
+        self.span_metric_total = 0
+        self.Oviedo_total = 0
+        self.Chepin_total = 0
+        self.global_vars_dict = dict()
+        self.global_vars_metric_total = 0.0
+        self.Cocol_total = 0
+        self.HenrynCafura_total = 0.0
+        self.CardnGlass_total = 0.0
+        self.functions = dict()
 
-        # check input args
-        (read, write) = self.get_unique_vars_read_write_count(
-            function_metrics.vars_args)
-        function_metrics.fan_in_i += read
-        function_metrics.fan_out_i += write
-        # check global variables list
-        (read, write) = self.get_unique_vars_read_write_count(
-            function_metrics.global_vars_used)
-        function_metrics.fan_in_i += read
-        function_metrics.fan_out_i += write
-
-        fan_in = function_metrics.fan_in_s + function_metrics.fan_in_i
-        fan_out = function_metrics.fan_out_s + function_metrics.fan_out_i
-        return function_metrics.CC + pow((fan_in + fan_out), 2)
-
-    def get_static_metrics(self, function_ea):
+    def start_analysis(self, metrics_used):
         """
-        The function calculates all supported metrics.
-        @function_ea - function address
-        @return - function metrics structure
+        The function starts static metrics analysis.
+        @metrics_used - a dictionary of metrics used in the following format {metrics_list element:1 or 0}
+        PTAL metrics_list global list and args_parser routine
+        @return - None
         """
-        f_start = function_ea
-        f_end = idc.find_func_end(function_ea)
-        function_metrics = Metrics_function(function_ea)
+        self.metrics_mask = metrics_used
+        # For each of the segments
+        for seg_ea in idautils.Segments():
+            # For each of the functions
+            function_ea = seg_ea
+            while function_ea != idaapi.BADADDR:
+                function_name = idc.get_func_name(function_ea)
+                # if already analyzed
+                if self.functions.get(function_name, None) != None:
+                    function_ea = idc.get_next_func(function_ea)
+                    continue
+                print(f"Analysing {function_name}@{hex(function_ea)}")
+                try:
+                    self.functions[function_name] = Metrics_function(
+                        function_ea, self.metrics_mask)
+                    self.functions[function_name].start_analysis()
 
-        edges = set()
-        boundaries = set((f_start, ))
-        mnemonics = dict()
-        operands = dict()
-        node_graph = None
-        cases_in_switches = 0
+                except Exception as e:
+                    print(
+                        f"Can't collect metric for function {function_name}@{hex(function_ea)}"
+                    )
+                    print(f"{e}")
+                    print('Skip')
+                    function_ea = idc.get_next_func(function_ea)
+                    continue
+                self.collect_total_metrics(function_name)
+                function_ea = idc.get_next_func(function_ea)
+        self.collect_final_metrics()
 
-        chunks = self.enumerate_function_chunks(f_start)
-        # For each defined chunk in the function.
-        for chunk in chunks:
-            for head in idautils.Heads(chunk[0], chunk[1]):
-                # If the element is an instruction
-                if head == idaapi.BADADDR:
-                    raise Exception("Invalid head for parsing")
-                if is_code(ida_bytes.get_full_flags(head)):
-                    function_metrics.loc_count += 1
-                    # Get the references made from the current instruction
-                    # and keep only the ones local to the function.
-                    refs = idautils.CodeRefsFrom(head, 0)
-                    refs_filtered = set()
-                    for ref in refs:
-                        if ref == idaapi.BADADDR:
-                            print("Invalid reference for head", head)
-                            raise Exception("Invalid reference for head")
-                        for chunk_filter in chunks:
-                            if ref >= chunk_filter[0] and ref < chunk_filter[1]:
-                                refs_filtered.add(ref)
-                                break
-                    refs = refs_filtered
-                    # Get instruction type and increase metrics
-                    instruction_type = GetInstructionType(head)
-                    if instruction_type == inType.BRANCH_INSTRUCTION:
-                        function_metrics.condition_count += 1
-                    elif instruction_type == inType.CALL_INSTRUCTION:
-                        function_metrics.calls_count += 1
-                        # set dict of function calls
-                        opnd = idc.print_operand(head, 0)
-                        opnd_type = idc.get_operand_type(head, 0)
-                        if opnd_type != idc.o_reg:
-                            opnd = opnd.replace("ds", "")
-                            function_metrics.calls_dict[
-                                opnd] = function_metrics.calls_dict.get(
-                                    opnd, 0) + 1
-                        else:
-                            opnd = idc.GetDisasm(head)
-                            opnd = opnd[opnd.find(";") + 1:]
-                            opnd = opnd.replace(" ", "")
-                            if opnd != None:
-                                function_metrics.calls_dict[
-                                    opnd] = function_metrics.calls_dict.get(
-                                        opnd, 0) + 1
-                        # Thus, we skip dynamic function calls (e.g. call eax)
-                    elif instruction_type == inType.ASSIGNMENT_INSTRUCTION:
-                        function_metrics.assign_count += 1
-                    # Get the mnemonic and increment the mnemonic count
-                    mnem = idc.print_insn_mnem(head)
-                    comment = idc.GetCommentEx(head, 0)
-                    if comment != None and comment.startswith(
-                            'switch') and 'jump' not in comment:
-                        case_count = comment[7:]
-                        space_index = case_count.find(" ")
-                        case_count = case_count[:space_index]
-                        case_count = int(case_count)
-                        # there is calc_switch_cases idaapi function
-                        cases_in_switches += case_count
-                    mnemonics[mnem] = mnemonics.get(mnem, 0) + 1
-
-                    if instruction_type != inType.BRANCH_INSTRUCTION and instruction_type != inType.CALL_INSTRUCTION:
-                        ops = self.get_instr_operands(head)
-                        for idx, (op, type) in enumerate(ops):
-                            operands[op] = operands.get(op, 0) + 1
-                            if type == 2:
-                                if self.is_var_global(
-                                        idc.get_operand_value(head, idx),
-                                        head) and "__" not in op:
-                                    self.global_vars_dict[op] = operands.get(
-                                        op, 0) + 1
-                                    function_metrics.global_vars_used.setdefault(
-                                        op, []).append(hex(head))
-                                    function_metrics.global_vars_access += 1
-                                elif "__" not in op:
-                                    # static variable
-                                    name = op
-                                    function_metrics.vars_local.setdefault(
-                                        name, []).append(hex(head))
-                            elif type == 3 or type == 4:
-                                name = self.get_local_var_name(op, head)
-                                if name:
-                                    function_metrics.vars_local.setdefault(
-                                        name, []).append(hex(head))
-
-                    if refs:
-                        # If the flow continues also to the next (address-wise)
-                        # instruction, we add a reference to it.
-                        # For instance, a conditional jump will not branch
-                        # if the condition is not met, so we save that
-                        # reference as well.
-                        next_head = idc.next_head(head, chunk[1])
-                        if next_head == idaapi.BADADDR:
-                            print("Invalid next head after ", head)
-                            raise Exception("Invalid next head")
-                        if is_flow(ida_bytes.get_full_flags(next_head)):
-                            refs.add(next_head)
-
-                        # Update the boundaries found so far.
-                        boundaries.update(refs)
-                        # For each of the references found, and edge is
-                        # created.
-                        for r in refs:
-                            # If the flow could also come from the address
-                            # previous to the destination of the branching
-                            # an edge is created.
-                            if is_flow(ida_bytes.get_full_flags(r)):
-                                prev_head = idc.prev_head(r, chunk[0])
-                                if prev_head == idaapi.BADADDR:
-                                    edges.add((hex(head), hex(r)))
-                                    #raise Exception("invalid reference to previous instruction for", hex(r))
-                                else:
-                                    edges.add((hex(prev_head), hex(r)))
-                            edges.add((hex(head), hex(r)))
-        # i#7: New algorithm of edges and boundaries constructing is required..
-        # Now boundaries and edges are making by using internal IDA functionality
-        # but it doesn't work for functions which have jumps beyond function boundaries
-        # (or jumps to "red" areas of code). Now we're generating warning in such
-        # situations but we need to manually parse all instructions.
-        bbls = self.get_bbls(chunks, boundaries, edges)
-        # save bbls boundaries in dict
-        for bbl in bbls:
-            function_metrics.bbls_boundaries[bbl[0]] = [x for x in bbl]
-        #Cyclomatic complexity CC = E - V + 2
-        if self.metrics_mask["cc"] == 1 or self.metrics_mask["cocol"] == 1:
-            function_metrics.CC = len(edges) - len(boundaries) + 2
-
-        # R measure
-        function_metrics.R = len(edges) / len(boundaries)
-        #Basic blocks count
-        function_metrics.bbl_count = len(boundaries)
-        #Jilb's metric: cl = CL/n
-        if self.metrics_mask["jilb"] == 1:
-            if (function_metrics.loc_count == 0):
-                function_metrics.CL = 0
-            else:
-                function_metrics.CL = (float(function_metrics.condition_count) + \
-                                   function_metrics.calls_count)/function_metrics.loc_count
-        # ABC metric: ABC = sqrt(A*A + B*B + C*C)
-        if self.metrics_mask["abc"] == 1:
-            function_metrics.ABC = pow(function_metrics.assign_count, 2) +\
-                                   pow(function_metrics.condition_count, 2) +\
-                                   pow(function_metrics.calls_count, 2)
-            function_metrics.ABC = math.sqrt(function_metrics.ABC)
-        # Create node graph
-        if self.metrics_mask["harr"] == 1 or self.metrics_mask[
-                "bound"] == 1 or self.metrics_mask["pi"] == 1:
-            node_graph = self.make_graph(edges, bbls, boundaries)
-
-        #Harrison metric: f = sum(ci) i: 0...n
-        if self.metrics_mask["harr"] == 1:
-            function_metrics.Harrison = self.get_harrison_metric(
-                node_graph, bbls)
-
-        #boundary values metric: Sa = sum(nodes_complexity)
-        if self.metrics_mask["bound"] == 1:
-            function_metrics.boundary_values = self.get_boundary_value_metric(
-                node_graph)
-
-        #CC_modified assumes switch (without default) as 1 edge and 1 node
-        if self.metrics_mask["cc_mod"] == 1:
-            if cases_in_switches:
-                function_metrics.CC_modified = (len(edges) - (
-                    (cases_in_switches - 1) * 2)) - (
-                        len(boundaries) - (cases_in_switches - 1)) + 2
-            else:
-                function_metrics.CC_modified = function_metrics.CC
-        #Pivovarsky metric: N(G) = CC_modified + sum(pi) i: 0...n
-        if self.metrics_mask["pi"] == 1:
-            function_metrics.Pivovarsky = function_metrics.CC_modified + self.get_boundary_value_metric(
-                node_graph, True)
-
-        #Halstead metric. see http://en.wikipedia.org/wiki/Halstead_complexity_measures
+    def collect_final_metrics(self):
+        ''' The routine collect some metrics that should be calculated after analysis
+        '''
+        if self.total_func_count > 0:
+            self.average_loc_count = self.total_loc_count / self.total_func_count
         if self.metrics_mask["h"] == 1 or self.metrics_mask["cocol"] == 1:
-            function_metrics.Halstead_basic.N1 = function_metrics.loc_count
-            function_metrics.Halstead_basic.n1 = len(mnemonics)
-            function_metrics.Halstead_basic.n2 = len(operands)
-            if len(operands) != 0:
-                function_metrics.Halstead_basic.N2 = sum(
-                    v for v in operands.values())
-                function_metrics.Halstead_basic.calculate()
+            self.Halstead_total.calculate()
+        if self.metrics_mask["global"] == 1:
+            self.global_vars_metric_total = self.add_global_vars_metric()
+        if self.metrics_mask["cocol"] == 1:
+            self.Cocol_total += self.Halstead_total.B + self.CC_total + self.total_loc_count
 
-        # Span metric
-        if self.metrics_mask["span"] == 1:
-            function_metrics.span_metric = self.get_span_metric(
-                function_metrics.bbls_boundaries)
+    def collect_total_metrics(self, function_name):
+        ''' The routine is used to add function measures to total metrics evaluation
+        @function_name - name of function
+        '''
+        self.total_loc_count += self.functions[function_name].loc_count
+        self.total_bbl_count += self.functions[function_name].bbl_count
+        self.total_func_count += 1
+        self.total_condition_count += self.functions[
+            function_name].condition_count
+        self.total_assign_count += self.functions[function_name].assign_count
+        self.R_total += self.functions[function_name].R
 
-        # Oviedo metric C = aCF + bsum(DFi)
-        if self.metrics_mask["oviedo"] == 1:
-            function_metrics.Oviedo = len(edges) + self.get_oviedo_df(
-                function_metrics.vars_local)
+        self.CC_modified_total += self.functions[function_name].CC_modified
+        self.Pivovarsky_total += self.functions[function_name].Pivovarsky
+        self.Harrison_total += self.functions[function_name].Harrison
+        self.boundary_values_total += self.functions[
+            function_name].boundary_values
 
-        # Chepin metric Q= P+2M+3C
-        if self.metrics_mask["chepin"] == 1:
-            function_metrics.Chepin = self.get_chepin(
-                function_metrics.vars_local, function_ea, function_metrics)
+        self.Halstead_total.n1 += self.functions[
+            function_name].Halstead_basic.n1
+        self.Halstead_total.n2 += self.functions[
+            function_name].Halstead_basic.n2
+        self.Halstead_total.N1 += self.functions[
+            function_name].Halstead_basic.N1
+        self.Halstead_total.N2 += self.functions[
+            function_name].Halstead_basic.N2
 
-        # Henry and Cafura metric
-        if self.metrics_mask["h&c"] == 1 or self.metrics_mask["c&s"] == 1:
-            function_metrics.HenrynCafura = self.get_henryncafura_metric(
-                function_ea, function_metrics)
+        self.CC_total += self.functions[function_name].CC
+        self.CL_total += self.functions[function_name].CL
+        self.ABC_total += self.functions[function_name].ABC
 
-        # Card and Glass metric C = S + D
-        if self.metrics_mask["c&s"] == 1:
-            function_metrics.CardnGlass = pow((function_metrics.fan_out_i + function_metrics.fan_out_s), 2) +\
-                                  (len(function_metrics.vars_args))/(function_metrics.fan_out_i + function_metrics.fan_out_s + 1)
-        #free memory
-        if node_graph:
-            node_graph.clear()
-        function_metrics.vars_local.clear()
-        function_metrics.vars_args.clear()
-        function_metrics.global_vars_used.clear()
-        function_metrics.calls_dict.clear()
-        mnemonics.clear()
-        operands.clear()
-        edges.clear()
-        boundaries.clear()
-        gc.collect()
-        return function_metrics
+        self.span_metric_total += self.functions[function_name].span_metric
+        self.Oviedo_total += self.functions[function_name].Oviedo
+        self.Chepin_total += self.functions[function_name].Chepin
+        self.HenrynCafura_total += self.functions[function_name].HenrynCafura
+        self.CardnGlass_total += self.functions[function_name].CardnGlass
+
+        if self.metrics_mask["cocol"] == 1:
+            self.functions[function_name].Cocol = self.functions[
+                function_name].Halstead_basic.B + self.functions[
+                    function_name].CC + self.functions[function_name].loc_count
+
+    def add_global_vars_metric(self):
+        '''
+        The function calculates access count to global variables.
+        @return - total access count
+        '''
+
+        total_metric_count = 0
+        for function in self.functions:
+            if len(self.global_vars_dict) > 0:
+                self.functions[function].global_vars_metric = self.functions[
+                    function].global_vars_access / len(self.global_vars_dict)
+            total_metric_count += self.functions[function].global_vars_metric
+        return total_metric_count
 
 
 def init_analysis(metrics_used):
