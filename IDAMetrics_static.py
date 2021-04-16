@@ -160,6 +160,7 @@ class Halstead_metric:
         self.E = self.D * self.V
         self.B = (self.E**(2.0 / 3.0)) / 3000
 
+global_vars_dict = {}
 
 class Metrics_function:
     def __init__(self, function_ea, metrics_mask):
@@ -281,7 +282,7 @@ class Metrics_function:
                                 if self.is_var_global(
                                         idc.get_operand_value(head, idx),
                                         head) and "__" not in op:
-                                    self.global_vars_dict[op] = operands.get(
+                                    global_vars_dict[op] = operands.get(
                                         op, 0) + 1
                                     self.global_vars_used.setdefault(
                                         op, []).append(hex(head))
@@ -308,7 +309,7 @@ class Metrics_function:
                         next_head = idc.next_head(head, chunk[1])
                         if next_head == idaapi.BADADDR:
                             print("Invalid next head after ", head)
-                            raise Exception("Invalid next head")
+                            # raise Exception("Invalid next head")
                         if is_flow(ida_bytes.get_full_flags(next_head)):
                             refs.add(next_head)
 
@@ -980,7 +981,6 @@ class Metrics:
         self.span_metric_total = 0
         self.Oviedo_total = 0
         self.Chepin_total = 0
-        self.global_vars_dict = dict()
         self.global_vars_metric_total = 0.0
         self.Cocol_total = 0
         self.HenrynCafura_total = 0.0
@@ -1085,9 +1085,9 @@ class Metrics:
 
         total_metric_count = 0
         for function in self.functions:
-            if len(self.global_vars_dict) > 0:
+            if len(global_vars_dict) > 0:
                 self.functions[function].global_vars_metric = self.functions[
-                    function].global_vars_access / len(self.global_vars_dict)
+                    function].global_vars_access / len(global_vars_dict)
             total_metric_count += self.functions[function].global_vars_metric
         return total_metric_count
 
