@@ -18,7 +18,7 @@ for assign_instr_mnem in assign_instructions_general:
             return inType.ASSIGNMENT_INSTRUCTION
 ```
 
-#### The root of inaccuracy of `GetInstructionType`
+#### The root cause of inaccuracy of `GetInstructionType`
 
 Also, because the string matching need someone manually build a list. There may be omissions from the list.
 For example, `setnz` should be included in `assign_instructions_general`.

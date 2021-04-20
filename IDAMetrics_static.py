@@ -1091,6 +1091,132 @@ class Metrics:
             total_metric_count += self.functions[function].global_vars_metric
         return total_metric_count
 
+    def save_results(self, name):
+
+        print('Average lines of code in a function:',
+            self.average_loc_count)
+        print('Total number of functions:', self.total_func_count)
+        print('Total lines of code:', self.total_loc_count)
+        print('Total bbl count:', self.total_bbl_count)
+        print('Total assignments count:', self.total_assign_count)
+        print('Total R count:', self.R_total)
+        print('Total Cyclomatic complexity:', self.CC_total)
+        print('Total Jilb\'s metric:', self.CL_total)
+        print('Total ABC:', self.ABC_total)
+        print('Halstead:', self.Halstead_total.B)
+        print('Pivovarsky:', self.Pivovarsky_total)
+        print('Harrison:', self.Harrison_total)
+        print('Boundary value', self.boundary_values_total)
+        print('Span metric', self.span_metric_total)
+        print('Global var metric', self.global_vars_metric_total)
+        print('Oviedo metric', self.Oviedo_total)
+        print('Chepin metric', self.Chepin_total)
+        print('Henry&Cafura metric', self.HenrynCafura_total)
+        print('Cocol metric', self.Cocol_total)
+        print('Card&Glass metric', self.CardnGlass_total)
+        #Save in log file
+
+        if name == None:
+            return 0
+        f = open(name, 'w')
+        f.write('Average lines of code in a function: ' +
+                str(self.average_loc_count) + "\n")
+        f.write('Total number of functions: ' +
+                str(self.total_func_count) + "\n")
+        f.write('Total lines of code: ' + str(self.total_loc_count) +
+                "\n")
+        f.write('Total bbl count: ' + str(self.total_bbl_count) + "\n")
+        f.write('Total assignments count: ' +
+                str(self.total_assign_count) + "\n")
+        f.write('Total R count: ' + str(self.R_total) + "\n")
+        f.write('Total Cyclomatic complexity: ' + str(self.CC_total) +
+                "\n")
+        f.write('Total Jilb\'s metric: ' + str(self.CL_total) + "\n")
+        f.write('Total ABC: ' + str(self.ABC_total) + "\n")
+        f.write('Total Halstead:' + str(self.Halstead_total.B) + "\n")
+        f.write('Total Pivovarsky: ' + str(self.Pivovarsky_total) + "\n")
+        f.write('Total Harrison: ' + str(self.Harrison_total) + "\n")
+        f.write('Total Boundary value: ' +
+                str(self.boundary_values_total) + "\n")
+        f.write('Total Span metric: ' + str(self.span_metric_total) +
+                "\n")
+        f.write('Total Oviedo metric: ' + str(self.Oviedo_total) + "\n")
+        f.write('Total Chepin metric: ' + str(self.Chepin_total) + "\n")
+        f.write('Henry&Cafura metric: ' + str(self.HenrynCafura_total) +
+                "\n")
+        f.write('Cocol metric: ' + str(self.Cocol_total) + "\n")
+        f.write('CardnGlass metric: ' + str(self.CardnGlass_total) + "\n")
+        for function in self.functions:
+            f.write(str(function) + "\n")
+            f.write('  Lines of code in the function: ' +
+                    str(self.functions[function].loc_count) + "\n")
+            f.write('  Bbls count: ' +
+                    str(self.functions[function].bbl_count) + "\n")
+            f.write('  Condition count: ' +
+                    str(self.functions[function].condition_count) + "\n")
+            f.write('  Calls count: ' +
+                    str(self.functions[function].calls_count) + "\n")
+            f.write('  Assignments count: ' +
+                    str(self.functions[function].assign_count) + "\n")
+            f.write('  Cyclomatic complexity: ' +
+                    str(self.functions[function].CC) + "\n")
+            f.write('  Cyclomatic complexity modified: ' +
+                    str(self.functions[function].CC_modified) + "\n")
+            f.write('  Jilb\'s metric: ' +
+                    str(self.functions[function].CL) + "\n")
+            f.write('  ABC: ' + str(self.functions[function].ABC) + "\n")
+            f.write('  R count: ' + str(self.functions[function].R) +
+                    "\n")
+
+            f.write('    Halstead.B: ' +
+                    str(self.functions[function].Halstead_basic.B) + "\n")
+            f.write('    Halstead.E: ' +
+                    str(self.functions[function].Halstead_basic.E) + "\n")
+            f.write('    Halstead.D: ' +
+                    str(self.functions[function].Halstead_basic.D) + "\n")
+            f.write('    Halstead.N*: ' +
+                    str(self.functions[function].Halstead_basic.Ni) +
+                    "\n")
+            f.write('    Halstead.V: ' +
+                    str(self.functions[function].Halstead_basic.V) + "\n")
+            f.write('    Halstead.N1: ' +
+                    str(self.functions[function].Halstead_basic.N1) +
+                    "\n")
+            f.write('    Halstead.N2: ' +
+                    str(self.functions[function].Halstead_basic.N2) +
+                    "\n")
+            f.write('    Halstead.n1: ' +
+                    str(self.functions[function].Halstead_basic.n1) +
+                    "\n")
+            f.write('    Halstead.n2: ' +
+                    str(self.functions[function].Halstead_basic.n2) +
+                    "\n")
+
+            f.write('  Pivovarsky: ' +
+                    str(self.functions[function].Pivovarsky) + "\n")
+            f.write('  Harrison: ' +
+                    str(self.functions[function].Harrison) + "\n")
+            f.write('  Cocol metric' +
+                    str(self.functions[function].Cocol) + "\n")
+
+            f.write('  Boundary value: ' +
+                    str(self.functions[function].boundary_values) + "\n")
+            f.write('  Span metric: ' +
+                    str(self.functions[function].span_metric) + "\n")
+            f.write('  Global vars metric:' +
+                    str(self.functions[function].global_vars_metric) +
+                    "\n")
+            f.write('  Oviedo metric: ' +
+                    str(self.functions[function].Oviedo) + "\n")
+            f.write('  Chepin metric: ' +
+                    str(self.functions[function].Chepin) + "\n")
+            f.write('  CardnGlass metric: ' +
+                    str(self.functions[function].CardnGlass) + "\n")
+            f.write('  Henry&Cafura metric: ' +
+                    str(self.functions[function].HenrynCafura) + "\n")
+        f.close()
+
+
 
 def init_analysis(metrics_used):
     metrics_total = Metrics()
@@ -1100,8 +1226,7 @@ def init_analysis(metrics_used):
     analyzed_file = analyzed_file.replace(".", "_")
     mask = analyzed_file + "_" + current_time + ".txt"
     name = ida_kernwin.ask_file(1, mask, "Where to save metrics ?")
-
-    save_results(metrics_total, name)
+    metrics_total.save_results(name)
     return 0
 
 
@@ -1138,133 +1263,7 @@ class UI:
             self.metrics_used[i] = (
                 self.chks[iter].checkState() == QtCore.Qt.Checked)
         self.callback(self.metrics_used)
-        return 0
-
-
-def save_results(metrics_total, name):
-
-    print('Average lines of code in a function:',
-          metrics_total.average_loc_count)
-    print('Total number of functions:', metrics_total.total_func_count)
-    print('Total lines of code:', metrics_total.total_loc_count)
-    print('Total bbl count:', metrics_total.total_bbl_count)
-    print('Total assignments count:', metrics_total.total_assign_count)
-    print('Total R count:', metrics_total.R_total)
-    print('Total Cyclomatic complexity:', metrics_total.CC_total)
-    print('Total Jilb\'s metric:', metrics_total.CL_total)
-    print('Total ABC:', metrics_total.ABC_total)
-    print('Halstead:', metrics_total.Halstead_total.B)
-    print('Pivovarsky:', metrics_total.Pivovarsky_total)
-    print('Harrison:', metrics_total.Harrison_total)
-    print('Boundary value', metrics_total.boundary_values_total)
-    print('Span metric', metrics_total.span_metric_total)
-    print('Global var metric', metrics_total.global_vars_metric_total)
-    print('Oviedo metric', metrics_total.Oviedo_total)
-    print('Chepin metric', metrics_total.Chepin_total)
-    print('Henry&Cafura metric', metrics_total.HenrynCafura_total)
-    print('Cocol metric', metrics_total.Cocol_total)
-    print('Card&Glass metric', metrics_total.CardnGlass_total)
-    #Save in log file
-
-    if name == None:
-        return 0
-    f = open(name, 'w')
-    f.write('Average lines of code in a function: ' +
-            str(metrics_total.average_loc_count) + "\n")
-    f.write('Total number of functions: ' +
-            str(metrics_total.total_func_count) + "\n")
-    f.write('Total lines of code: ' + str(metrics_total.total_loc_count) +
-            "\n")
-    f.write('Total bbl count: ' + str(metrics_total.total_bbl_count) + "\n")
-    f.write('Total assignments count: ' +
-            str(metrics_total.total_assign_count) + "\n")
-    f.write('Total R count: ' + str(metrics_total.R_total) + "\n")
-    f.write('Total Cyclomatic complexity: ' + str(metrics_total.CC_total) +
-            "\n")
-    f.write('Total Jilb\'s metric: ' + str(metrics_total.CL_total) + "\n")
-    f.write('Total ABC: ' + str(metrics_total.ABC_total) + "\n")
-    f.write('Total Halstead:' + str(metrics_total.Halstead_total.B) + "\n")
-    f.write('Total Pivovarsky: ' + str(metrics_total.Pivovarsky_total) + "\n")
-    f.write('Total Harrison: ' + str(metrics_total.Harrison_total) + "\n")
-    f.write('Total Boundary value: ' +
-            str(metrics_total.boundary_values_total) + "\n")
-    f.write('Total Span metric: ' + str(metrics_total.span_metric_total) +
-            "\n")
-    f.write('Total Oviedo metric: ' + str(metrics_total.Oviedo_total) + "\n")
-    f.write('Total Chepin metric: ' + str(metrics_total.Chepin_total) + "\n")
-    f.write('Henry&Cafura metric: ' + str(metrics_total.HenrynCafura_total) +
-            "\n")
-    f.write('Cocol metric: ' + str(metrics_total.Cocol_total) + "\n")
-    f.write('CardnGlass metric: ' + str(metrics_total.CardnGlass_total) + "\n")
-    for function in metrics_total.functions:
-        f.write(str(function) + "\n")
-        f.write('  Lines of code in the function: ' +
-                str(metrics_total.functions[function].loc_count) + "\n")
-        f.write('  Bbls count: ' +
-                str(metrics_total.functions[function].bbl_count) + "\n")
-        f.write('  Condition count: ' +
-                str(metrics_total.functions[function].condition_count) + "\n")
-        f.write('  Calls count: ' +
-                str(metrics_total.functions[function].calls_count) + "\n")
-        f.write('  Assignments count: ' +
-                str(metrics_total.functions[function].assign_count) + "\n")
-        f.write('  Cyclomatic complexity: ' +
-                str(metrics_total.functions[function].CC) + "\n")
-        f.write('  Cyclomatic complexity modified: ' +
-                str(metrics_total.functions[function].CC_modified) + "\n")
-        f.write('  Jilb\'s metric: ' +
-                str(metrics_total.functions[function].CL) + "\n")
-        f.write('  ABC: ' + str(metrics_total.functions[function].ABC) + "\n")
-        f.write('  R count: ' + str(metrics_total.functions[function].R) +
-                "\n")
-
-        f.write('    Halstead.B: ' +
-                str(metrics_total.functions[function].Halstead_basic.B) + "\n")
-        f.write('    Halstead.E: ' +
-                str(metrics_total.functions[function].Halstead_basic.E) + "\n")
-        f.write('    Halstead.D: ' +
-                str(metrics_total.functions[function].Halstead_basic.D) + "\n")
-        f.write('    Halstead.N*: ' +
-                str(metrics_total.functions[function].Halstead_basic.Ni) +
-                "\n")
-        f.write('    Halstead.V: ' +
-                str(metrics_total.functions[function].Halstead_basic.V) + "\n")
-        f.write('    Halstead.N1: ' +
-                str(metrics_total.functions[function].Halstead_basic.N1) +
-                "\n")
-        f.write('    Halstead.N2: ' +
-                str(metrics_total.functions[function].Halstead_basic.N2) +
-                "\n")
-        f.write('    Halstead.n1: ' +
-                str(metrics_total.functions[function].Halstead_basic.n1) +
-                "\n")
-        f.write('    Halstead.n2: ' +
-                str(metrics_total.functions[function].Halstead_basic.n2) +
-                "\n")
-
-        f.write('  Pivovarsky: ' +
-                str(metrics_total.functions[function].Pivovarsky) + "\n")
-        f.write('  Harrison: ' +
-                str(metrics_total.functions[function].Harrison) + "\n")
-        f.write('  Cocol metric' +
-                str(metrics_total.functions[function].Cocol) + "\n")
-
-        f.write('  Boundary value: ' +
-                str(metrics_total.functions[function].boundary_values) + "\n")
-        f.write('  Span metric: ' +
-                str(metrics_total.functions[function].span_metric) + "\n")
-        f.write('  Global vars metric:' +
-                str(metrics_total.functions[function].global_vars_metric) +
-                "\n")
-        f.write('  Oviedo metric: ' +
-                str(metrics_total.functions[function].Oviedo) + "\n")
-        f.write('  Chepin metric: ' +
-                str(metrics_total.functions[function].Chepin) + "\n")
-        f.write('  CardnGlass metric: ' +
-                str(metrics_total.functions[function].CardnGlass) + "\n")
-        f.write('  Henry&Cafura metric: ' +
-                str(metrics_total.functions[function].HenrynCafura) + "\n")
-    f.close()
+        self.panel.close()
 
 
 class debug:
@@ -1298,9 +1297,7 @@ if __name__ == "__main__":
         current_time = strftime("%Y-%m-%d_%H-%M-%S")
         analyzed_file = ida_nalt.get_root_filename()
         analyzed_file = analyzed_file.replace(".", "_")
-        name = os.getcwd()
-        name = name + "/" + analyzed_file + "_" + current_time + ".txt"
-        save_results(metrics_total, name)
+        metrics_total.save_results(os.getcwd() + "/" + analyzed_file + "_" + current_time + ".txt")
 
     if os.getenv('IDAPYTHON') == 'auto':
         Exit(0)
