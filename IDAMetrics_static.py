@@ -112,21 +112,6 @@ metrics_names = ["Lines of code", "Basic blocks count", "Routines calls count", 
                  "Cocol"]
 
 
-def GetInstructionType(instr_addr):
-    insn = ida_ua.insn_t()
-    inslen = ida_ua.decode_insn(insn, instr_addr)
-    if ida_idp.is_call_insn(insn):
-        return inType.CALL_INSTRUCTION
-    # TODO: jump should be implemented by the is_flow API, but need function bound
-    instr_mnem = idc.print_insn_mnem(instr_addr)
-    if instr_mnem.startswith('j'):
-        return inType.BRANCH_INSTRUCTION
-    if ida_idp.has_insn_feature(insn.itype, CF_CHG):
-        return inType.ASSIGNMENT_INSTRUCTION
-    if ida_idp.has_insn_feature(insn.itype, CF_USE):
-        return inType.COMPARE_INSTRUCTION
-    return inType.OTHER_INSTRUCTION
-
 
 class Halstead_metric:
     def __init__(self):
@@ -160,12 +145,15 @@ class Halstead_metric:
         self.E = self.D * self.V
         self.B = (self.E**(2.0 / 3.0)) / 3000
 
+
 global_vars_dict = {}
+fuck = []
 
 class Metrics_function:
     def __init__(self, function_ea, metrics_mask):
         self.function_name = idc.get_func_name(function_ea)
         self.function_ea = function_ea
+        self.function_end = idc.find_func_end(self.function_ea)
         self.metrics_mask = metrics_mask
         self.loc_count = 0
         self.bbl_count = 0
@@ -222,6 +210,7 @@ class Metrics_function:
             for head in idautils.Heads(*chunk):
                 # If the element is an instruction
                 if head == idaapi.BADADDR:
+                    # the idautils.Heads is a generator, have to check during iterating
                     raise Exception("Invalid head for parsing")
                 if is_code(ida_bytes.get_full_flags(head)):
                     self.loc_count += 1
@@ -236,10 +225,10 @@ class Metrics_function:
                         for chunk_filter in chunks:
                             if ref >= chunk_filter[0] and ref < chunk_filter[1]:
                                 refs_filtered.add(ref)
-                                break  # break ?
+                                break
                     refs = refs_filtered
                     # Get instruction type and increase metrics
-                    instruction_type = GetInstructionType(head)
+                    instruction_type = self.GetInstructionType(head)
                     if instruction_type == inType.BRANCH_INSTRUCTION:
                         self.condition_count += 1
                     elif instruction_type == inType.CALL_INSTRUCTION:
@@ -282,8 +271,8 @@ class Metrics_function:
                                 if self.is_var_global(
                                         idc.get_operand_value(head, idx),
                                         head) and "__" not in op:
-                                    global_vars_dict[op] = operands.get(
-                                        op, 0) + 1
+                                    global_vars_dict[op] = operands.get(op,
+                                                                        0) + 1
                                     self.global_vars_used.setdefault(
                                         op, []).append(hex(head))
                                     self.global_vars_access += 1
@@ -720,7 +709,7 @@ class Metrics_function:
                         bbls.append(bbl)
                         bbl = []
                     bbl.append(hex(head))
-                elif GetInstructionType(head) == inType.BRANCH_INSTRUCTION:
+                elif self.GetInstructionType(head) == inType.BRANCH_INSTRUCTION:
                     bbl.append(hex(head))
                     bbls.append(bbl)
                     bbl = []
@@ -755,7 +744,7 @@ class Metrics_function:
         @return - True if used
         '''
         for instr in bbl:
-            instr_type = GetInstructionType(int(instr, 16))
+            instr_type = self.GetInstructionType(int(instr, 16))
             if instr_type == inType.CALL_INSTRUCTION or instr_type == inType.BRANCH_INSTRUCTION:
                 instr_ops = self.get_instr_operands(int(instr, 16))
                 if op in instr_ops:
@@ -838,7 +827,7 @@ class Metrics_function:
         for bbl_key, bbl in bbls_dict.items():
             for head in bbl:
                 instr_op = self.get_instr_operands(int(head, 16))
-                instr_type = GetInstructionType(int(head, 16))
+                instr_type = self.GetInstructionType(int(head, 16))
                 if instr_type == inType.CALL_INSTRUCTION or instr_type == inType.BRANCH_INSTRUCTION:
                     continue
                 for op, type in instr_op:
@@ -941,7 +930,7 @@ class Metrics_function:
                 print("WARNING: empty usage list for ", arg_var)
                 continue
             for instr_addr in usage_list:
-                instr_type = GetInstructionType(int(instr_addr, 16))
+                instr_type = self.GetInstructionType(int(instr_addr, 16))
                 if instr_type == inType.ASSIGNMENT_INSTRUCTION:
                     #detect operand position
                     ops = self.get_instr_operands(int(instr_addr, 16))
@@ -959,6 +948,33 @@ class Metrics_function:
                     continue
         return len(tmp_dict_read), len(tmp_dict_write)
 
+    def GetInstructionType(self, instr_addr):
+        insn = ida_ua.insn_t()
+        inslen = ida_ua.decode_insn(insn, instr_addr)
+        f_end = idc.find_func_end(self.function_ea)
+
+        # edge case: call $+5
+        if ida_idp.is_call_insn(insn):
+            return inType.CALL_INSTRUCTION
+        # if the coderefs target is local and next instruction is_flow, then it's condition jump (not always true)
+        should = False
+        instr_mnem = idc.print_insn_mnem(instr_addr)
+        if instr_mnem.startswith('j'):
+            should = True
+        refs = idautils.CodeRefsFrom(instr_addr, 0)
+        refs = set(
+            filter(
+                lambda addr: addr >= self.function_ea and addr <= f_end, refs))
+        if refs:
+            n_head = idc.next_head(instr_addr, f_end)
+            if is_flow(ida_bytes.get_full_flags(n_head)):
+                return inType.BRANCH_INSTRUCTION
+        #TODO: did not consider the unconditional jump here,
+        if ida_idp.has_insn_feature(insn.itype, CF_CHG):
+            return inType.ASSIGNMENT_INSTRUCTION
+        if ida_idp.has_insn_feature(insn.itype, CF_USE):
+            return inType.COMPARE_INSTRUCTION
+        return inType.OTHER_INSTRUCTION
 
 class Metrics:
     def __init__(self):
@@ -1093,8 +1109,7 @@ class Metrics:
 
     def save_results(self, name):
 
-        print('Average lines of code in a function:',
-            self.average_loc_count)
+        print('Average lines of code in a function:', self.average_loc_count)
         print('Total number of functions:', self.total_func_count)
         print('Total lines of code:', self.total_loc_count)
         print('Total bbl count:', self.total_bbl_count)
@@ -1121,29 +1136,25 @@ class Metrics:
         f = open(name, 'w')
         f.write('Average lines of code in a function: ' +
                 str(self.average_loc_count) + "\n")
-        f.write('Total number of functions: ' +
-                str(self.total_func_count) + "\n")
-        f.write('Total lines of code: ' + str(self.total_loc_count) +
+        f.write('Total number of functions: ' + str(self.total_func_count) +
                 "\n")
+        f.write('Total lines of code: ' + str(self.total_loc_count) + "\n")
         f.write('Total bbl count: ' + str(self.total_bbl_count) + "\n")
-        f.write('Total assignments count: ' +
-                str(self.total_assign_count) + "\n")
-        f.write('Total R count: ' + str(self.R_total) + "\n")
-        f.write('Total Cyclomatic complexity: ' + str(self.CC_total) +
+        f.write('Total assignments count: ' + str(self.total_assign_count) +
                 "\n")
+        f.write('Total R count: ' + str(self.R_total) + "\n")
+        f.write('Total Cyclomatic complexity: ' + str(self.CC_total) + "\n")
         f.write('Total Jilb\'s metric: ' + str(self.CL_total) + "\n")
         f.write('Total ABC: ' + str(self.ABC_total) + "\n")
         f.write('Total Halstead:' + str(self.Halstead_total.B) + "\n")
         f.write('Total Pivovarsky: ' + str(self.Pivovarsky_total) + "\n")
         f.write('Total Harrison: ' + str(self.Harrison_total) + "\n")
-        f.write('Total Boundary value: ' +
-                str(self.boundary_values_total) + "\n")
-        f.write('Total Span metric: ' + str(self.span_metric_total) +
+        f.write('Total Boundary value: ' + str(self.boundary_values_total) +
                 "\n")
+        f.write('Total Span metric: ' + str(self.span_metric_total) + "\n")
         f.write('Total Oviedo metric: ' + str(self.Oviedo_total) + "\n")
         f.write('Total Chepin metric: ' + str(self.Chepin_total) + "\n")
-        f.write('Henry&Cafura metric: ' + str(self.HenrynCafura_total) +
-                "\n")
+        f.write('Henry&Cafura metric: ' + str(self.HenrynCafura_total) + "\n")
         f.write('Cocol metric: ' + str(self.Cocol_total) + "\n")
         f.write('CardnGlass metric: ' + str(self.CardnGlass_total) + "\n")
         for function in self.functions:
@@ -1162,11 +1173,10 @@ class Metrics:
                     str(self.functions[function].CC) + "\n")
             f.write('  Cyclomatic complexity modified: ' +
                     str(self.functions[function].CC_modified) + "\n")
-            f.write('  Jilb\'s metric: ' +
-                    str(self.functions[function].CL) + "\n")
-            f.write('  ABC: ' + str(self.functions[function].ABC) + "\n")
-            f.write('  R count: ' + str(self.functions[function].R) +
+            f.write('  Jilb\'s metric: ' + str(self.functions[function].CL) +
                     "\n")
+            f.write('  ABC: ' + str(self.functions[function].ABC) + "\n")
+            f.write('  R count: ' + str(self.functions[function].R) + "\n")
 
             f.write('    Halstead.B: ' +
                     str(self.functions[function].Halstead_basic.B) + "\n")
@@ -1175,37 +1185,31 @@ class Metrics:
             f.write('    Halstead.D: ' +
                     str(self.functions[function].Halstead_basic.D) + "\n")
             f.write('    Halstead.N*: ' +
-                    str(self.functions[function].Halstead_basic.Ni) +
-                    "\n")
+                    str(self.functions[function].Halstead_basic.Ni) + "\n")
             f.write('    Halstead.V: ' +
                     str(self.functions[function].Halstead_basic.V) + "\n")
             f.write('    Halstead.N1: ' +
-                    str(self.functions[function].Halstead_basic.N1) +
-                    "\n")
+                    str(self.functions[function].Halstead_basic.N1) + "\n")
             f.write('    Halstead.N2: ' +
-                    str(self.functions[function].Halstead_basic.N2) +
-                    "\n")
+                    str(self.functions[function].Halstead_basic.N2) + "\n")
             f.write('    Halstead.n1: ' +
-                    str(self.functions[function].Halstead_basic.n1) +
-                    "\n")
+                    str(self.functions[function].Halstead_basic.n1) + "\n")
             f.write('    Halstead.n2: ' +
-                    str(self.functions[function].Halstead_basic.n2) +
-                    "\n")
+                    str(self.functions[function].Halstead_basic.n2) + "\n")
 
             f.write('  Pivovarsky: ' +
                     str(self.functions[function].Pivovarsky) + "\n")
-            f.write('  Harrison: ' +
-                    str(self.functions[function].Harrison) + "\n")
-            f.write('  Cocol metric' +
-                    str(self.functions[function].Cocol) + "\n")
+            f.write('  Harrison: ' + str(self.functions[function].Harrison) +
+                    "\n")
+            f.write('  Cocol metric' + str(self.functions[function].Cocol) +
+                    "\n")
 
             f.write('  Boundary value: ' +
                     str(self.functions[function].boundary_values) + "\n")
             f.write('  Span metric: ' +
                     str(self.functions[function].span_metric) + "\n")
             f.write('  Global vars metric:' +
-                    str(self.functions[function].global_vars_metric) +
-                    "\n")
+                    str(self.functions[function].global_vars_metric) + "\n")
             f.write('  Oviedo metric: ' +
                     str(self.functions[function].Oviedo) + "\n")
             f.write('  Chepin metric: ' +
@@ -1215,7 +1219,6 @@ class Metrics:
             f.write('  Henry&Cafura metric: ' +
                     str(self.functions[function].HenrynCafura) + "\n")
         f.close()
-
 
 
 def init_analysis(metrics_used):
@@ -1277,7 +1280,7 @@ class debug:
         adr = f.start_ea
         ins = []
         while adr < f.end_ea:
-            ins.append((GetInstructionType(adr), adr))
+            ins.append((self.GetInstructionType(adr), adr))
             adr = idc.next_head(adr)
         return ins
 
@@ -1297,7 +1300,8 @@ if __name__ == "__main__":
         current_time = strftime("%Y-%m-%d_%H-%M-%S")
         analyzed_file = ida_nalt.get_root_filename()
         analyzed_file = analyzed_file.replace(".", "_")
-        metrics_total.save_results(os.getcwd() + "/" + analyzed_file + "_" + current_time + ".txt")
+        metrics_total.save_results(os.getcwd() + "/" + analyzed_file + "_" +
+                                   current_time + ".txt")
 
     if os.getenv('IDAPYTHON') == 'auto':
         Exit(0)
