@@ -70,9 +70,6 @@ from collections import defaultdict
 from idaapi import *
 from enum import Enum
 
-from PyQt5.QtWidgets import QWidget, QGroupBox, QDialog, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QPushButton
-from PyQt5.QtWidgets import QMainWindow, QFileDialog, QDialog, QLineEdit, QMessageBox, QAction, QMenu, QApplication, QLabel
-from PyQt5 import QtCore, QtGui, QtWidgets
 
 
 class inType(Enum):
@@ -947,7 +944,7 @@ class Metrics_function:
         insn = ida_ua.insn_t()
         inslen = ida_ua.decode_insn(insn, instr_addr)
 
-        # edge case: call $+5
+        # TODO: something like `call $+5` should be exclusive
         if ida_idp.is_call_insn(insn):
             return inType.CALL_INSTRUCTION
         # if the coderefs target is local and next instruction is_flow, then it's condition jump (not always true)
@@ -1279,7 +1276,10 @@ class debug:
 
 if __name__ == "__main__":
     ida_auto.auto_wait()  #wait while ida finish analysis
-    if os.getenv('IDAPYTHON') != 'auto':
+    if not idaapi.cvar.batch:
+        from PyQt5.QtWidgets import QWidget, QGroupBox, QDialog, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QPushButton
+        from PyQt5.QtWidgets import QMainWindow, QFileDialog, QDialog, QLineEdit, QMessageBox, QAction, QMenu, QApplication, QLabel
+        from PyQt5 import QtCore, QtGui, QtWidgets
         ui = UI(init_analysis)
     else:  #hidden mode
         metrics_mask = dict()
@@ -1294,6 +1294,4 @@ if __name__ == "__main__":
         analyzed_file = analyzed_file.replace(".", "_")
         metrics_total.save_results(os.getcwd() + "/" + analyzed_file + "_" +
                                    current_time + ".txt")
-
-    if os.getenv('IDAPYTHON') == 'auto':
-        Exit(0)
+        idc.qexit(0)
