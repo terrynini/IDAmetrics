@@ -29,13 +29,7 @@ of the authors and should not be interpreted as representing official policies,
 either expressed or implied, of the FreeBSD Project.
 """
 """
-This IDA script collects static software complexity metrics for binary executable
-of x86 architecture.
-
-Minimal requirements:
-IDA 5.5.0
-Python 2.5
-IDAPython 1.2.0
+This IDA script collects static software complexity metrics for binary executable.
 
 Supported the following metrics:
     1. Lines of code (function/module)
@@ -112,7 +106,6 @@ metrics_names = ["Lines of code", "Basic blocks count", "Routines calls count", 
                  "Cocol"]
 
 
-
 class Halstead_metric:
     def __init__(self):
         self.n1 = 0
@@ -147,12 +140,13 @@ class Halstead_metric:
 
 
 global_vars_dict = {}
-fuck = []
+
 
 class Metrics_function:
     def __init__(self, function_ea, metrics_mask):
         self.function_name = idc.get_func_name(function_ea)
         self.function_ea = function_ea
+        self.function_start = function_ea
         self.function_end = idc.find_func_end(self.function_ea)
         self.metrics_mask = metrics_mask
         self.loc_count = 0
@@ -234,20 +228,20 @@ class Metrics_function:
                     elif instruction_type == inType.CALL_INSTRUCTION:
                         self.calls_count += 1
                         # set dict of function calls
-                        opnd = idc.print_operand(head, 0)
                         opnd_type = idc.get_operand_type(head, 0)
-                        if opnd_type != idc.o_reg:
-                            opnd = opnd.replace("ds", "")
-                            self.calls_dict[opnd] = self.calls_dict.get(
-                                opnd, 0) + 1
+                        opnd = get_operand_value(head, 0)
+                        if opnd_type == idc.o_reg:
+                            key = f"reg_{opnd}"
+                        elif opnd_type == idc.o_phrase:
+                            key = f"phrase_{opnd}"
+                        elif opnd_type == idc.o_displ:
+                            key = f"displ_{opnd}"
+                        elif opnd_type in [idc.o_mem, idc.o_imm, idc.o_far, idc.o_near]:
+                            key = f"mem_{opnd}"
                         else:
-                            opnd = idc.GetDisasm(head)
-                            opnd = opnd[opnd.find(";") + 1:]
-                            opnd = opnd.replace(" ", "")
-                            if opnd != None:
-                                self.calls_dict[opnd] = self.calls_dict.get(
-                                    opnd, 0) + 1
-                        # Thus, we skip dynamic function calls (e.g. call eax)
+                            print("Impossible@", head)
+                            raise Exception("Cthulhu has awakened")
+                        self.calls_dict[key] = self.calls_dict.get(key, 0) + 1
                     elif instruction_type == inType.ASSIGNMENT_INSTRUCTION:
                         self.assign_count += 1
                     # Get the mnemonic and increment the mnemonic count
@@ -709,7 +703,8 @@ class Metrics_function:
                         bbls.append(bbl)
                         bbl = []
                     bbl.append(hex(head))
-                elif self.GetInstructionType(head) == inType.BRANCH_INSTRUCTION:
+                elif self.GetInstructionType(
+                        head) == inType.BRANCH_INSTRUCTION:
                     bbl.append(hex(head))
                     bbls.append(bbl)
                     bbl = []
@@ -951,30 +946,27 @@ class Metrics_function:
     def GetInstructionType(self, instr_addr):
         insn = ida_ua.insn_t()
         inslen = ida_ua.decode_insn(insn, instr_addr)
-        f_end = idc.find_func_end(self.function_ea)
 
         # edge case: call $+5
         if ida_idp.is_call_insn(insn):
             return inType.CALL_INSTRUCTION
         # if the coderefs target is local and next instruction is_flow, then it's condition jump (not always true)
-        should = False
-        instr_mnem = idc.print_insn_mnem(instr_addr)
-        if instr_mnem.startswith('j'):
-            should = True
         refs = idautils.CodeRefsFrom(instr_addr, 0)
         refs = set(
             filter(
-                lambda addr: addr >= self.function_ea and addr <= f_end, refs))
+                lambda addr: addr >= self.function_start and addr <= self.
+                function_end, refs))
         if refs:
-            n_head = idc.next_head(instr_addr, f_end)
+            n_head = idc.next_head(instr_addr, self.function_end)
             if is_flow(ida_bytes.get_full_flags(n_head)):
                 return inType.BRANCH_INSTRUCTION
-        #TODO: did not consider the unconditional jump here,
+        #TODO: did not consider the unconditional jump here
         if ida_idp.has_insn_feature(insn.itype, CF_CHG):
             return inType.ASSIGNMENT_INSTRUCTION
         if ida_idp.has_insn_feature(insn.itype, CF_USE):
             return inType.COMPARE_INSTRUCTION
         return inType.OTHER_INSTRUCTION
+
 
 class Metrics:
     def __init__(self):
