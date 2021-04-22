@@ -73,11 +73,13 @@ from enum import Enum
 
 
 class inType(Enum):
-    OTHER_INSTRUCTION = 0
-    CALL_INSTRUCTION = 1
-    BRANCH_INSTRUCTION = 2
-    ASSIGNMENT_INSTRUCTION = 3
-    COMPARE_INSTRUCTION = 4
+    OTHERS = 0
+    CALL = 1
+    CONDITIONAL_BRANCH = 2
+    UNCONDITIONAL_BRACH = 3
+    ASSIGNMENT = 4
+    COMPARE = 5
+
 
 
 __EA64__ = idaapi.BADADDR == 0xFFFFFFFFFFFFFFFF
@@ -192,6 +194,7 @@ class Metrics_function:
         boundaries = set((f_start, ))
         mnemonics = dict()
         operands = dict()
+        switchea = set()
         node_graph = None
         cases_in_switches = 0
 
@@ -220,9 +223,9 @@ class Metrics_function:
                     refs = refs_filtered
                     # Get instruction type and increase metrics
                     instruction_type = self.GetInstructionType(head)
-                    if instruction_type == inType.BRANCH_INSTRUCTION:
+                    if instruction_type == inType.CONDITIONAL_BRANCH:
                         self.condition_count += 1
-                    elif instruction_type == inType.CALL_INSTRUCTION:
+                    elif instruction_type == inType.CALL:
                         self.calls_count += 1
                         # set dict of function calls
                         opnd_type = idc.get_operand_type(head, 0)
@@ -239,22 +242,17 @@ class Metrics_function:
                             print("Impossible@", head)
                             raise Exception("Cthulhu has awakened")
                         self.calls_dict[key] = self.calls_dict.get(key, 0) + 1
-                    elif instruction_type == inType.ASSIGNMENT_INSTRUCTION:
+                    elif instruction_type == inType.ASSIGNMENT:
                         self.assign_count += 1
                     # Get the mnemonic and increment the mnemonic count
                     mnem = idc.print_insn_mnem(head)
-                    comment = idc.GetCommentEx(head, 0)
-                    if comment != None and comment.startswith(
-                            'switch') and 'jump' not in comment:
-                        case_count = comment[7:]
-                        space_index = case_count.find(" ")
-                        case_count = case_count[:space_index]
-                        case_count = int(case_count)
-                        # there is calc_switch_cases idaapi function
-                        cases_in_switches += case_count
                     mnemonics[mnem] = mnemonics.get(mnem, 0) + 1
-
-                    if instruction_type != inType.BRANCH_INSTRUCTION and instruction_type != inType.CALL_INSTRUCTION:
+                    # switch case count
+                    switch_info = ida_nalt.get_switch_info(head)
+                    if switch_info is not None and switch_info.startea not in switchea:
+                        switchea.add(switch_info.startea)
+                        cases_in_switches += switch_info.ncases
+                    if instruction_type != inType.CONDITIONAL_BRANCH and instruction_type != inType.CALL:
                         ops = self.get_instr_operands(head)
                         for idx, (op, type) in enumerate(ops):
                             operands[op] = operands.get(op, 0) + 1
@@ -701,7 +699,7 @@ class Metrics_function:
                         bbl = []
                     bbl.append(hex(head))
                 elif self.GetInstructionType(
-                        head) == inType.BRANCH_INSTRUCTION:
+                        head) == inType.CONDITIONAL_BRANCH:
                     bbl.append(hex(head))
                     bbls.append(bbl)
                     bbl = []
@@ -737,7 +735,7 @@ class Metrics_function:
         '''
         for instr in bbl:
             instr_type = self.GetInstructionType(int(instr, 16))
-            if instr_type == inType.CALL_INSTRUCTION or instr_type == inType.BRANCH_INSTRUCTION:
+            if instr_type == inType.CALL or instr_type == inType.CONDITIONAL_BRANCH:
                 instr_ops = self.get_instr_operands(int(instr, 16))
                 if op in instr_ops:
                     return True
@@ -820,7 +818,7 @@ class Metrics_function:
             for head in bbl:
                 instr_op = self.get_instr_operands(int(head, 16))
                 instr_type = self.GetInstructionType(int(head, 16))
-                if instr_type == inType.CALL_INSTRUCTION or instr_type == inType.BRANCH_INSTRUCTION:
+                if instr_type == inType.CALL or instr_type == inType.CONDITIONAL_BRANCH:
                     continue
                 for op, type in instr_op:
                     if self.is_operand_called(op, bbl):
@@ -923,7 +921,7 @@ class Metrics_function:
                 continue
             for instr_addr in usage_list:
                 instr_type = self.GetInstructionType(int(instr_addr, 16))
-                if instr_type == inType.ASSIGNMENT_INSTRUCTION:
+                if instr_type == inType.ASSIGNMENT:
                     #detect operand position
                     ops = self.get_instr_operands(int(instr_addr, 16))
                     for idx, (op, type) in enumerate(ops):
@@ -934,7 +932,7 @@ class Metrics_function:
                         else:
                             tmp_dict_read[arg_var] = tmp_dict_read.get(
                                 arg_var, 0) + 1
-                elif instr_type == inType.COMPARE_INSTRUCTION:
+                elif instr_type == inType.COMPARE:
                     tmp_dict_read[arg_var] = tmp_dict_read.get(arg_var, 0) + 1
                 else:
                     continue
@@ -946,8 +944,9 @@ class Metrics_function:
 
         # TODO: something like `call $+5` should be exclusive
         if ida_idp.is_call_insn(insn):
-            return inType.CALL_INSTRUCTION
+            return inType.CALL
         # if the coderefs target is local and next instruction is_flow, then it's condition jump (not always true)
+        # something like `jmp eax` is not available for conditional jump in x86 and x86/64
         refs = idautils.CodeRefsFrom(instr_addr, 0)
         refs = set(
             filter(
@@ -956,13 +955,14 @@ class Metrics_function:
         if refs:
             n_head = idc.next_head(instr_addr, self.function_end)
             if is_flow(ida_bytes.get_full_flags(n_head)):
-                return inType.BRANCH_INSTRUCTION
-        #TODO: did not consider the unconditional jump here
+                return inType.CONDITIONAL_BRANCH
+            else:
+                return inType.UNCONDITIONAL_BRACH
         if ida_idp.has_insn_feature(insn.itype, CF_CHG):
-            return inType.ASSIGNMENT_INSTRUCTION
+            return inType.ASSIGNMENT
         if ida_idp.has_insn_feature(insn.itype, CF_USE):
-            return inType.COMPARE_INSTRUCTION
-        return inType.OTHER_INSTRUCTION
+            return inType.COMPARE
+        return inType.OTHERS
 
 
 class Metrics:
