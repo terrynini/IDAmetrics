@@ -254,9 +254,10 @@ class Metrics_function:
                         cases_in_switches += switch_info.ncases
                     if instruction_type != inType.CONDITIONAL_BRANCH and instruction_type != inType.CALL:
                         ops = self.get_instr_operands(head)
-                        for idx, (op, type) in enumerate(ops):
+                        for idx, (op, op_type) in enumerate(ops):
                             operands[op] = operands.get(op, 0) + 1
-                            if type == 2:
+                            if op_type == idc.o_mem:
+                                # TODO: refactor this
                                 if self.is_var_global(
                                         idc.get_operand_value(head, idx),
                                         head) and "__" not in op:
@@ -271,7 +272,7 @@ class Metrics_function:
                                     self.vars_local.setdefault(name,
                                                                []).append(
                                                                    hex(head))
-                            elif type == 3 or type == 4:
+                            elif op_type == idc.o_phrase or op_type == idc.o_displ:
                                 name = self.get_local_var_name(op, head)
                                 if name:
                                     self.vars_local.setdefault(name,
@@ -285,8 +286,8 @@ class Metrics_function:
                         # if the condition is not met, so we save that
                         # reference as well.
                         next_head = idc.next_head(head, chunk[1])
-                        if next_head == idaapi.BADADDR:
-                            print("Invalid next head after ", head)
+                        # if next_head == idaapi.BADADDR:
+                            # print("Invalid next head after ", head)
                             # raise Exception("Invalid next head")
                         if is_flow(ida_bytes.get_full_flags(next_head)):
                             refs.add(next_head)
@@ -716,13 +717,11 @@ class Metrics_function:
         @return - the function returns list of variables which is
         used in the instruction
         """
-        i = 0
         instr_op = list()
-        while i < 4:
+        for i in range(6):
             op = idc.print_operand(head, i)
             if op != "":
                 instr_op.append((op, idc.get_operand_type(head, i)))
-            i += 1
         return instr_op
 
     def is_operand_called(self, op, bbl):
